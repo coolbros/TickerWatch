@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<rss version="2.0">
+<channel>
+  <title>Undated Feed</title>
+  <link>https://example.com/feed</link>
+  <item>
+    <title>Undated Article Headline</title>
+    <link>https://example.com/article-undated</link>
+    <description>This article has no pubDate field.</description>
+    <guid>undated-001</guid>
+  </item>
+</channel>
+</rss>

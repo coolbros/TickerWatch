@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<rss version="2.0">
+<channel>
+  <title>Relative URL Feed</title>
+  <link>https://exchange.example.com</link>
+  <item>
+    <title>Quarterly Filing Report</title>
+    <link>/filings/2026/quarterly-report.html</link>
+    <guid>relative-001</guid>
+    <pubDate>Thu, 06 Nov 2026 08:00:00 GMT</pubDate>
+  </item>
+</channel>
+</rss>

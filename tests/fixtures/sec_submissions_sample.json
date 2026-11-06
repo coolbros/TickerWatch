@@ -1,0 +1,53 @@
+{
+  "cik": "0000320193",
+  "entityType": "operating",
+  "sic": "3571",
+  "sicDescription": "ELECTRONIC COMPUTERS",
+  "name": "Apple Inc.",
+  "tickers": ["AAPL"],
+  "exchanges": ["Nasdaq"],
+  "ein": "942404110",
+  "filings": {
+    "recent": {
+      "accessionNumber": [
+        "0000320193-24-000106",
+        "0000320193-24-000080",
+        "0000320193-24-000075"
+      ],
+      "filingDate": [
+        "2024-10-31",
+        "2024-08-02",
+        "2024-05-03"
+      ],
+      "reportDate": [
+        "2024-09-28",
+        "2024-06-29",
+        "2024-03-30"
+      ],
+      "acceptanceDateTime": [
+        "2024-10-31T18:01:25.000Z",
+        "2024-08-02T16:30:10.000Z",
+        "2024-05-03T16:15:00.000Z"
+      ],
+      "act": ["34", "34", "34"],
+      "form": ["10-K", "10-Q", "10-Q/A"],
+      "fileNumber": ["001-36743", "001-36743", "001-36743"],
+      "filmNumber": ["241416391", "241154321", "241012345"],
+      "items": ["", "", ""],
+      "size": [1543210, 892340, 912300],
+      "isXBRL": [1, 1, 1],
+      "isInlineXBRL": [1, 1, 1],
+      "primaryDocument": [
+        "aapl-20240928.htm",
+        "aapl-20240629.htm",
+        "aapl-20240330a.htm"
+      ],
+      "primaryDocDescription": [
+        "Annual Report",
+        "Quarterly Report",
+        "Amended Quarterly Report"
+      ]
+    },
+    "files": []
+  }
+}

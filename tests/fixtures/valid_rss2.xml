@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<rss version="2.0">
+<channel>
+  <title>MarketWire Financial News</title>
+  <link>https://marketwire.example.com</link>
+  <description>Breaking financial and business headlines</description>
+  <lastBuildDate>Thu, 06 Nov 2026 12:00:00 GMT</lastBuildDate>
+  <item>
+    <title>Apple Reports Record Services Revenue in Q4</title>
+    <link>https://marketwire.example.com/news/apple-q4-results-2026</link>
+    <description><![CDATA[Apple Inc. announced financial results for its fiscal 2026 fourth quarter.]]></description>
+    <guid isPermaLink="false">marketwire-guid-1001</guid>
+    <pubDate>Thu, 06 Nov 2026 10:30:00 GMT</pubDate>
+  </item>
+  <item>
+    <title>Microsoft Expands Cloud Infrastructure Capacity</title>
+    <link>https://marketwire.example.com/news/msft-cloud-expansion?utm_source=rss</link>
+    <description>Microsoft Corporation today announced major data center expansions across Europe and Asia.</description>
+    <guid isPermaLink="false">marketwire-guid-1002</guid>
+    <pubDate>Thu, 06 Nov 2026 09:15:00 GMT</pubDate>
+  </item>
+</channel>
+</rss>

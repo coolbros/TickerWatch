@@ -1,0 +1,21 @@
+feeds:
+  - id: sec_news_press
+    name: "SEC Press Releases"
+    url: "https://www.sec.gov/news/pressreleases.rss"
+    poll_interval_seconds: 600
+    language: "en"
+    tickers: []
+
+  - id: yahoo_finance_top
+    name: "Yahoo Finance Top Stories"
+    url: "https://finance.yahoo.com/news/rssindex"
+    poll_interval_seconds: 300
+    language: "en"
+    tickers: []
+
+  - id: moneycontrol_market_reports
+    name: "Moneycontrol Market Reports (India)"
+    url: "https://www.moneycontrol.com/rss/marketreports.xml"
+    poll_interval_seconds: 300
+    language: "en"
+    tickers: []
