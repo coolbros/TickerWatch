@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
+from backend.config import get_ssl_context
 from backend.connectors.base import BaseConnector
 from backend.connectors.models import ConnectorStatus, FetchBatch, SourceItem
 from backend.ingestion.normalizer import normalize_record
@@ -19,6 +20,45 @@ logger = logging.getLogger(__name__)
 class SECConfigurationError(ValueError):
     """Raised when SEC connector configuration invariants (e.g. User-Agent) are violated."""
     pass
+
+
+class SECRateLimiter:
+    """
+    Process-wide rate limiter enforcing SEC EDGAR's 10 req/s maximum policy
+    across all connector instances and companies.
+    """
+    _instance: Optional["SECRateLimiter"] = None
+
+    def __init__(self, min_interval_seconds: float = 0.12) -> None:
+        self.min_interval_seconds = min_interval_seconds
+        self._last_request_monotonic = 0.0
+        self._lock: Optional[asyncio.Lock] = None
+        self._lock_loop: Optional[asyncio.AbstractEventLoop] = None
+
+    def _get_lock(self) -> asyncio.Lock:
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        if self._lock is None or self._lock_loop is not current_loop:
+            self._lock = asyncio.Lock()
+            self._lock_loop = current_loop
+        return self._lock
+
+    @classmethod
+    def get_shared_limiter(cls, min_interval_seconds: float = 0.12) -> "SECRateLimiter":
+        if cls._instance is None:
+            cls._instance = cls(min_interval_seconds=min_interval_seconds)
+        return cls._instance
+
+    async def acquire(self) -> None:
+        async with self._get_lock():
+            now = time.monotonic()
+            elapsed = now - self._last_request_monotonic
+            if elapsed < self.min_interval_seconds:
+                await asyncio.sleep(self.min_interval_seconds - elapsed)
+            self._last_request_monotonic = time.monotonic()
 
 
 def normalize_cik(cik: str) -> str:
@@ -35,7 +75,7 @@ class SECConnector(BaseConnector):
     Ingests official SEC EDGAR company filing submissions via data.sec.gov.
     Enforces SEC automated access policy:
     1. Identifiable User-Agent with valid contact address (e.g., 'AppName admin@example.com').
-    2. Rate limiting (maximum 10 requests per second enforced with token pacing).
+    2. Rate limiting (maximum 10 requests per second enforced with shared token pacing).
     """
 
     BASE_URL = "https://data.sec.gov/submissions/CIK{cik}.json"
@@ -51,6 +91,7 @@ class SECConnector(BaseConnector):
         poll_interval_seconds: int = 600,
         http_client: Optional[httpx.AsyncClient] = None,
         min_request_interval_seconds: float = 0.12,  # Max ~8 requests/sec, well under SEC's 10 req/s limit
+        rate_limiter: Optional[SECRateLimiter] = None,
     ) -> None:
         super().__init__(
             connector_id=connector_id,
@@ -65,7 +106,7 @@ class SECConnector(BaseConnector):
         }
         self._http_client = http_client
         self.min_request_interval_seconds = min_request_interval_seconds
-        self._last_request_timestamp = 0.0
+        self.rate_limiter = rate_limiter or SECRateLimiter.get_shared_limiter(min_request_interval_seconds)
 
         # Validate configuration if connector is enabled
         if self.enabled and not self._is_valid_user_agent(self.user_agent):
@@ -84,17 +125,13 @@ class SECConnector(BaseConnector):
         return len(parts) >= 2
 
     async def _rate_limit_pause(self) -> None:
-        """Enforce rate-limiting interval between SEC API calls."""
-        now = time.monotonic()
-        elapsed = now - self._last_request_timestamp
-        if elapsed < self.min_request_interval_seconds:
-            await asyncio.sleep(self.min_request_interval_seconds - elapsed)
-        self._last_request_timestamp = time.monotonic()
+        """Enforce shared application-wide rate-limiting interval between SEC API calls."""
+        await self.rate_limiter.acquire()
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._http_client and not self._http_client.is_closed:
             return self._http_client
-        return httpx.AsyncClient(timeout=20.0, follow_redirects=True)
+        return httpx.AsyncClient(verify=get_ssl_context(), timeout=20.0, follow_redirects=True)
 
     def _parse_cursor(self, cursor: Optional[str]) -> Dict[str, Any]:
         """Cursor structure: {'ciks': {'0000320193': {'last_accession': '...', 'seen': [...]}}}"""

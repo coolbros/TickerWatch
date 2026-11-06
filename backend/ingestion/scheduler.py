@@ -78,21 +78,40 @@ class IngestionScheduler:
             self.tasks[connector.connector_id] = task
 
     async def stop(self, timeout_seconds: float = 5.0) -> None:
-        """Signal all loops to stop and gracefully wait for ongoing iterations."""
+        """
+        Gracefully stop all loops:
+        1. Set shutdown_event so idle/sleeping loops exit immediately.
+        2. Wait up to timeout_seconds for active iterations to finish.
+        3. Forcefully cancel only remaining uncompleted tasks.
+        4. Retrieve all task exceptions to prevent unhandled exception warnings.
+        """
         logger.info("Signalling ingestion scheduler shutdown...")
         self.shutdown_event.set()
 
         running_tasks = [t for t in self.tasks.values() if not t.done()]
         if running_tasks:
-            for t in running_tasks:
-                t.cancel()
-            try:
-                await asyncio.wait_for(
-                    asyncio.gather(*running_tasks, return_exceptions=True),
-                    timeout=timeout_seconds,
+            # 1. Graceful wait: allow ongoing iterations to complete naturally
+            done, pending = await asyncio.wait(
+                running_tasks,
+                timeout=timeout_seconds,
+            )
+
+            # 2. Cancel only stubborn tasks that exceeded the graceful window
+            if pending:
+                logger.warning(
+                    f"{len(pending)} ingestion task(s) did not complete within graceful window; cancelling..."
                 )
-            except asyncio.TimeoutError:
-                logger.warning("Some ingestion tasks did not stop within graceful shutdown timeout")
+                for t in pending:
+                    t.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+
+            # 3. Harvest exceptions from completed tasks to avoid unhandled warnings
+            for t in done:
+                if not t.cancelled() and t.exception():
+                    logger.error(
+                        "Ingestion background task finished with exception",
+                        extra={"task_name": t.get_name(), "error": str(t.exception())}
+                    )
 
         self.tasks.clear()
         logger.info("Ingestion scheduler stopped cleanly")

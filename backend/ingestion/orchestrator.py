@@ -58,21 +58,20 @@ class IngestionOrchestrator:
                 operation_name=f"fetch_{connector_id}",
             )
 
-            # Step 3 & 4: Items are already parsed and normalised by connector.
-            # Step 5 & 6 & 7: Durably persist items & advance cursor atomically in DB.
-            # Shielded from task cancellation to protect transactional integrity.
-            inserted, skipped = await asyncio.shield(
-                asyncio.to_thread(
+            # Step 5 & 6 & 7 & 8: Durably persist items, advance DB cursor, and ack connector.
+            # Entire operation is shielded from task cancellation to protect transactional integrity.
+            async def _persist_and_ack() -> tuple[int, int]:
+                ins, skp = await asyncio.to_thread(
                     self.repo.save_batch_atomic,
                     connector_id,
                     batch.items,
                     batch.next_cursor,
                 )
-            )
+                if batch.next_cursor:
+                    await connector.ack(batch.next_cursor)
+                return ins, skp
 
-            # Step 8: Connector ACK only AFTER successful durable persistence
-            if batch.next_cursor:
-                await connector.ack(batch.next_cursor)
+            inserted, skipped = await asyncio.shield(_persist_and_ack())
 
             duration_ms = (time.monotonic() - t0) * 1000.0
             completion_time = datetime.now(timezone.utc)

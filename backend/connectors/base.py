@@ -58,20 +58,27 @@ class BaseConnector(ABC):
     async def health(self) -> ConnectorHealth:
         """
         Return connector health state.
-        Computes STALE condition if a healthy feed has not observed updates in an extended window.
+        Distinguishes transport connectivity from content freshness.
+        Source inactivity or empty/304 responses do NOT mark the connector as unhealthy.
         """
         current_status = self.status
         now = datetime.now(timezone.utc)
+        is_idle = False
 
         if not self.enabled:
             current_status = ConnectorStatus.DISABLED
         elif self.consecutive_failures >= 3:
             current_status = ConnectorStatus.DEGRADED
         elif self.last_successful_at_utc:
-            # If last successful contact was more than 3x poll intervals ago, flag as STALE
+            # If transport polling has stalled for > 3x intervals, transport is STALE
             stale_threshold_seconds = max(self.poll_interval_seconds * 3, 900)
             if (now - self.last_successful_at_utc).total_seconds() > stale_threshold_seconds:
                 current_status = ConnectorStatus.STALE
+
+        # Track source content inactivity (e.g., > 7 days without new articles) separately
+        if self.last_observed_item_at_utc:
+            if (now - self.last_observed_item_at_utc).total_seconds() > 7 * 86400:
+                is_idle = True
 
         return ConnectorHealth(
             connector_id=self.connector_id,
@@ -81,6 +88,7 @@ class BaseConnector(ABC):
             last_attempted_at_utc=self.last_attempted_at_utc,
             last_successful_at_utc=self.last_successful_at_utc,
             last_observed_item_at_utc=self.last_observed_item_at_utc,
+            is_source_idle=is_idle,
             consecutive_failures=self.consecutive_failures,
             last_error=self.last_error,
             poll_interval_seconds=self.poll_interval_seconds,

@@ -41,7 +41,8 @@ class Repository:
             cursor = conn.cursor()
             cursor.execute(
                 """SELECT connector_id, cursor, last_successful_fetch, last_attempted_fetch,
-                          last_observed_item, consecutive_failures, status, last_error, updated_at_utc
+                          last_observed_item, last_successful_persistence, consecutive_failures,
+                          status, last_error, updated_at_utc
                    FROM connector_state WHERE connector_id = ?;""",
                 (connector_id,)
             )
@@ -54,6 +55,7 @@ class Repository:
                 last_successful_fetch=row["last_successful_fetch"],
                 last_attempted_fetch=row["last_attempted_fetch"],
                 last_observed_item=row["last_observed_item"],
+                last_successful_persistence=row["last_successful_persistence"],
                 consecutive_failures=row["consecutive_failures"],
                 status=row["status"],
                 last_error=row["last_error"],
@@ -66,7 +68,8 @@ class Repository:
             cursor = conn.cursor()
             cursor.execute(
                 """SELECT connector_id, cursor, last_successful_fetch, last_attempted_fetch,
-                          last_observed_item, consecutive_failures, status, last_error, updated_at_utc
+                          last_observed_item, last_successful_persistence, consecutive_failures,
+                          status, last_error, updated_at_utc
                    FROM connector_state ORDER BY connector_id ASC;"""
             )
             rows = cursor.fetchall()
@@ -77,6 +80,7 @@ class Repository:
                     last_successful_fetch=r["last_successful_fetch"],
                     last_attempted_fetch=r["last_attempted_fetch"],
                     last_observed_item=r["last_observed_item"],
+                    last_successful_persistence=r["last_successful_persistence"],
                     consecutive_failures=r["consecutive_failures"],
                     status=r["status"],
                     last_error=r["last_error"],
@@ -190,21 +194,24 @@ class Repository:
                 else:
                     skipped_count += 1
 
+            last_persisted_time = now_str if inserted_count > 0 else None
+
             # Advance cursor atomically in the same transaction
             conn.execute(
                 """INSERT INTO connector_state (
                        connector_id, cursor, last_successful_fetch, last_observed_item,
-                       consecutive_failures, status, last_error, updated_at_utc
-                   ) VALUES (?, ?, ?, ?, 0, 'HEALTHY', NULL, ?)
+                       last_successful_persistence, consecutive_failures, status, last_error, updated_at_utc
+                   ) VALUES (?, ?, ?, ?, ?, 0, 'HEALTHY', NULL, ?)
                    ON CONFLICT(connector_id) DO UPDATE SET
                        cursor = COALESCE(excluded.cursor, connector_state.cursor),
                        last_successful_fetch = excluded.last_successful_fetch,
                        last_observed_item = COALESCE(excluded.last_observed_item, connector_state.last_observed_item),
+                       last_successful_persistence = COALESCE(excluded.last_successful_persistence, connector_state.last_successful_persistence),
                        consecutive_failures = 0,
                        status = 'HEALTHY',
                        last_error = NULL,
                        updated_at_utc = excluded.updated_at_utc;""",
-                (connector_id, new_cursor, now_str, last_item_time, now_str)
+                (connector_id, new_cursor, now_str, last_item_time, last_persisted_time, now_str)
             )
 
             conn.commit()

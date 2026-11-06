@@ -9,6 +9,7 @@ from urllib.parse import urljoin
 import feedparser
 import httpx
 
+from backend.config import get_ssl_context
 from backend.connectors.base import BaseConnector
 from backend.connectors.models import FetchBatch, SourceItem
 from backend.ingestion.normalizer import NormalizationError, normalize_record
@@ -53,7 +54,7 @@ class RSSConnector(BaseConnector):
     async def _get_client(self) -> httpx.AsyncClient:
         if self._http_client and not self._http_client.is_closed:
             return self._http_client
-        return httpx.AsyncClient(timeout=20.0, follow_redirects=True)
+        return httpx.AsyncClient(verify=get_ssl_context(), timeout=20.0, follow_redirects=True)
 
     def _parse_cursor(self, cursor: Optional[str]) -> Dict[str, Any]:
         """Deserialize cursor JSON into internal dictionary."""

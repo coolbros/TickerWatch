@@ -36,6 +36,7 @@ class ConnectorStateRow:
     last_successful_fetch: Optional[str]
     last_attempted_fetch: Optional[str]
     last_observed_item: Optional[str]
+    last_successful_persistence: Optional[str]
     consecutive_failures: int
     status: str
     last_error: Optional[str]

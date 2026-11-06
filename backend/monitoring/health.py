@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 from backend.connectors.models import ConnectorHealth, ConnectorStatus
 from backend.connectors.registry import ConnectorRegistry
 from backend.database.repository import Repository
+from backend.ingestion.normalizer import parse_timestamp_to_utc
 
 
 class HealthService:
@@ -34,6 +35,13 @@ class HealthService:
                 health.status = ConnectorStatus.AUTH_ERROR
             elif db_state.status == "DEGRADED" and health.status == ConnectorStatus.HEALTHY:
                 health.status = ConnectorStatus.DEGRADED
+
+            if db_state.last_successful_persistence and not health.last_successful_persistence_at_utc:
+                health.last_successful_persistence_at_utc = parse_timestamp_to_utc(db_state.last_successful_persistence)
+            if db_state.last_observed_item and not health.last_observed_item_at_utc:
+                health.last_observed_item_at_utc = parse_timestamp_to_utc(db_state.last_observed_item)
+            if db_state.last_successful_fetch and not health.last_successful_at_utc:
+                health.last_successful_at_utc = parse_timestamp_to_utc(db_state.last_successful_fetch)
 
         return health
 

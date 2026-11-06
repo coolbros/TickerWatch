@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import ssl
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -167,3 +168,22 @@ def setup_logging(level: str | None = None) -> None:
     handler.setLevel(numeric_level)
     handler.setFormatter(JSONLogFormatter())
     root_logger.addHandler(handler)
+
+
+def get_ssl_context() -> ssl.SSLContext:
+    """
+    Produce an SSLContext that automatically loads Windows system root certificates
+    on win32 to prevent local issuer verification failures with corporate or system certs.
+    """
+    ctx = ssl.create_default_context()
+    if sys.platform == "win32":
+        for store in ("ROOT", "CA"):
+            try:
+                for cert, encoding, trust in ssl.enum_certificates(store):
+                    try:
+                        ctx.load_verify_locations(cadata=cert)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+    return ctx

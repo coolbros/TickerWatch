@@ -115,6 +115,8 @@ class ConnectorHealth(BaseModel):
     last_attempted_at_utc: Optional[datetime] = None
     last_successful_at_utc: Optional[datetime] = None
     last_observed_item_at_utc: Optional[datetime] = None
+    last_successful_persistence_at_utc: Optional[datetime] = None
+    is_source_idle: bool = False
     consecutive_failures: int = 0
     last_error: Optional[str] = None
     next_poll_at_utc: Optional[datetime] = None
