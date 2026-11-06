@@ -26,6 +26,9 @@ def test_app(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("SEC_ENABLED", "false")  # keep minimal for unit test
 
+    from backend.config import get_settings
+    get_settings(reload=True)
+
     app = create_app()
     return app
 

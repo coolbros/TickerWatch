@@ -143,10 +143,10 @@ class Settings(BaseSettings):
 _settings: Settings | None = None
 
 
-def get_settings() -> Settings:
+def get_settings(reload: bool = False) -> Settings:
     """Singleton getter for application settings."""
     global _settings
-    if _settings is None:
+    if _settings is None or reload:
         _settings = Settings()
     return _settings
 
