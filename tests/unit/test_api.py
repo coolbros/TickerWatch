@@ -104,3 +104,12 @@ def test_get_articles_populated(client, test_app):
 def test_get_article_not_found(client):
     response = client.get("/articles/999999")
     assert response.status_code == 404
+
+
+def test_get_dashboard(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "TickerWatch" in response.text
+    assert "Data Ingestion Pipelines" in response.text
+

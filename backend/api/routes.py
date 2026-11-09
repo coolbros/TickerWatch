@@ -3,7 +3,9 @@
 import json
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import HTMLResponse
 
+from backend.api.dashboard import DASHBOARD_HTML
 from backend.api.schemas import (
     ArticleResponse,
     HealthResponse,
@@ -16,6 +18,12 @@ from backend.ingestion.orchestrator import IngestionOrchestrator
 from backend.monitoring.health import HealthService
 
 router = APIRouter()
+
+
+@router.get("/", response_class=HTMLResponse)
+async def serve_dashboard():
+    """Serve the interactive TickerWatch MVP dashboard."""
+    return HTMLResponse(content=DASHBOARD_HTML)
 
 
 def get_dependencies():
