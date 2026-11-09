@@ -158,3 +158,32 @@ async def test_sec_invalid_json():
     # Malformed JSON should record failure and yield 0 items without crashing entire batch
     assert len(batch.items) == 0
     assert connector.consecutive_failures >= 1
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_sec_multi_cik_partial_failure(sec_sample_json):
+    """
+    Verify multi-company isolation: if one tracked CIK returns invalid data,
+    the valid company filings are still extracted and status reflects DEGRADED partial success.
+    """
+    cik_apple = "0000320193"
+    cik_bad = "0001018724"
+
+    url_apple = f"https://data.sec.gov/submissions/CIK{cik_apple}.json"
+    url_bad = f"https://data.sec.gov/submissions/CIK{cik_bad}.json"
+
+    respx.get(url_apple).mock(return_value=httpx.Response(200, text=sec_sample_json))
+    respx.get(url_bad).mock(return_value=httpx.Response(200, text="INVALID_JSON_STREAM"))
+
+    connector = SECConnector(
+        user_agent="TickerWatch/0.1 admin@example.com",
+        tracked_ciks={cik_apple: "AAPL", cik_bad: "AMZN"},
+    )
+    batch = await connector.fetch()
+
+    # Apple filings successfully extracted (3 items)
+    assert len(batch.items) == 3
+    # Status is DEGRADED because one CIK failed
+    assert connector.status == ConnectorStatus.DEGRADED
+

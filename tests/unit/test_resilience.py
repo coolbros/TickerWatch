@@ -83,3 +83,22 @@ async def test_execute_with_retry_fails_immediately_on_permanent_error():
         await execute_with_retry(permanent_fail, policy=policy, operation_name="perm_fail")
 
     assert attempts == 1  # Should not retry permanent 403
+
+
+@pytest.mark.asyncio
+async def test_execute_with_retry_exceeds_max_retries():
+    """Verify that when transient errors persist beyond max_retries, the final error is raised."""
+    policy = RetryPolicy(max_retries=2, base_delay_seconds=0.01, jitter=False)
+    attempts = 0
+
+    async def always_failing():
+        nonlocal attempts
+        attempts += 1
+        raise httpx.ConnectTimeout("Persistent connection failure")
+
+    with pytest.raises(httpx.ConnectTimeout):
+        await execute_with_retry(always_failing, policy=policy, operation_name="always_fail")
+
+    # Initial attempt (0) + 2 retries = 3 total attempts
+    assert attempts == 3
+

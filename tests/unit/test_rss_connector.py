@@ -216,3 +216,53 @@ async def test_lookback_deduplication(valid_rss2_content):
     # Second fetch with cursor: should deduplicate previously seen IDs
     batch2 = await connector.fetch(cursor=batch1.next_cursor)
     assert len(batch2.items) == 0  # Both items already seen in cursor window
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_feed_redirect_following(valid_rss2_content):
+    """Verify that RSS connector follows HTTP 301/302 redirects to canonical location."""
+    old_url = "https://example.com/redirect-source.xml"
+    new_url = "https://example.com/canonical-feed.xml"
+
+    respx.get(old_url).mock(return_value=httpx.Response(301, headers={"Location": new_url}))
+    respx.get(new_url).mock(return_value=httpx.Response(200, text=valid_rss2_content))
+
+    connector = RSSConnector(connector_id="redirect_conn", feed_url=old_url)
+    batch = await connector.fetch()
+
+    assert batch.source_status == "OK"
+    assert len(batch.items) == 2
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_http_404_not_found_sets_health_failure():
+    """Verify that non-retryable 404 error increments failure count and preserves error message."""
+    url = "https://example.com/missing-feed.xml"
+    respx.get(url).mock(return_value=httpx.Response(404, text="Not Found"))
+
+    connector = RSSConnector(connector_id="not_found_conn", feed_url=url)
+    with pytest.raises(httpx.HTTPStatusError):
+        await connector.fetch()
+
+    health = await connector.health()
+    assert health.consecutive_failures == 1
+    assert "404" in (health.last_error or "")
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_http_401_unauthorized_sets_auth_error():
+    """Verify that HTTP 401 immediately transitions status to AUTH_ERROR."""
+    url = "https://example.com/auth-protected.xml"
+    respx.get(url).mock(return_value=httpx.Response(401, text="Unauthorized"))
+
+    connector = RSSConnector(connector_id="auth_conn", feed_url=url)
+    with pytest.raises(httpx.HTTPStatusError):
+        await connector.fetch()
+
+    health = await connector.health()
+    assert health.status == ConnectorStatus.AUTH_ERROR
+    assert health.consecutive_failures == 1
+

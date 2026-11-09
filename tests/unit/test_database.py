@@ -187,3 +187,125 @@ def test_database_reopen_and_persistence(tmp_path):
     articles = repo2.get_articles(connector_id="conn_persist")
     assert len(articles) == 1
     assert articles[0].source_item_id == "p-1"
+
+
+def test_sqlite_wal_pragmas_applied(test_repo):
+    """Verify that SQLite connection configuration applies critical PRAGMAs for concurrency and durability."""
+    with test_repo._get_conn() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute("PRAGMA journal_mode;")
+        journal_mode = cursor.fetchone()[0]
+        assert journal_mode.lower() == "wal"
+
+        cursor.execute("PRAGMA synchronous;")
+        sync_mode = cursor.fetchone()[0]
+        # NORMAL is represented as 1
+        assert sync_mode == 1
+
+        cursor.execute("PRAGMA foreign_keys;")
+        foreign_keys = cursor.fetchone()[0]
+        assert foreign_keys == 1
+
+        cursor.execute("PRAGMA busy_timeout;")
+        busy_timeout = cursor.fetchone()[0]
+        assert busy_timeout >= 10000
+
+
+def test_concurrent_readers_during_writer(test_repo):
+    """
+    Verify WAL mode property: concurrent readers can read snapshot data
+    without being blocked by an in-flight write transaction.
+    """
+    # Seed initial article
+    test_repo.save_batch_atomic(
+        "conn_wal",
+        [make_dummy_item(connector_id="conn_wal", source_item_id="initial-1", title="Initial Article")],
+        "cur_init"
+    )
+
+    writer_conn = test_repo._get_conn()
+    reader_conn = test_repo._get_conn()
+
+    try:
+        # Writer begins transaction and inserts uncommitted article
+        writer_conn.execute("BEGIN IMMEDIATE;")
+        writer_conn.execute(
+            """INSERT INTO articles (
+                   connector_id, source_item_id, publisher, source_type, title, url,
+                   observed_at_utc, content_hash, raw_metadata, tickers, created_at_utc
+               ) VALUES ('conn_wal', 'uncommitted-2', 'Pub', 'rss', 'Uncommitted Title',
+                         'https://example.com/2', datetime('now'), 'hash2', '{}', '[]', datetime('now'));"""
+        )
+
+        # Reader performs query while writer holds lock
+        cursor = reader_conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM articles WHERE connector_id = 'conn_wal';")
+        reader_count = cursor.fetchone()[0]
+        # Reader sees only committed snapshot (1 article) without blocking or locking
+        assert reader_count == 1
+
+        # Writer commits
+        writer_conn.commit()
+
+        # Reader now sees updated state (2 articles)
+        cursor.execute("SELECT COUNT(*) FROM articles WHERE connector_id = 'conn_wal';")
+        reader_count_after = cursor.fetchone()[0]
+        assert reader_count_after == 2
+
+    finally:
+        writer_conn.close()
+        reader_conn.close()
+
+
+def test_fts5_triggers_synchronization(test_repo):
+    """
+    Verify Full-Text Search (FTS5) index synchronization via database triggers:
+    1. Insertion triggers insert into articles_fts.
+    2. Update triggers update articles_fts.
+    3. Deletion triggers remove from articles_fts.
+    """
+    # 1. Insert article with unique headline
+    test_repo.save_batch_atomic(
+        "conn_fts",
+        [make_dummy_item(
+            connector_id="conn_fts",
+            source_item_id="fts-1",
+            title="NVIDIA Announces Quantum Computing Breakthrough",
+            content_hash="nvda_hash_1"
+        )],
+        "cur_fts_1"
+    )
+
+    with test_repo._get_conn() as conn:
+        cursor = conn.cursor()
+
+        # Query FTS5 table
+        cursor.execute("SELECT rowid, title FROM articles_fts WHERE articles_fts MATCH 'Quantum';")
+        rows = cursor.fetchall()
+        assert len(rows) == 1
+        assert "Quantum Computing" in rows[0]["title"]
+        art_id = rows[0]["rowid"]
+
+        # 2. Update article title directly in articles table
+        cursor.execute(
+            "UPDATE articles SET title = 'NVIDIA Revises Quantum Roadmap' WHERE id = ?;",
+            (art_id,)
+        )
+        conn.commit()
+
+        # Verify old term no longer matches and new term matches
+        cursor.execute("SELECT rowid FROM articles_fts WHERE articles_fts MATCH 'Breakthrough';")
+        assert len(cursor.fetchall()) == 0
+
+        cursor.execute("SELECT rowid FROM articles_fts WHERE articles_fts MATCH 'Roadmap';")
+        assert len(cursor.fetchall()) == 1
+
+        # 3. Delete article
+        cursor.execute("DELETE FROM articles WHERE id = ?;", (art_id,))
+        conn.commit()
+
+        # Verify FTS index cleaned up
+        cursor.execute("SELECT rowid FROM articles_fts WHERE articles_fts MATCH 'Roadmap';")
+        assert len(cursor.fetchall()) == 0
+
