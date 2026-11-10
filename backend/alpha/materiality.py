@@ -104,10 +104,18 @@ class FinancialMaterialityEngine:
                     mag_score = 0.20  # In-line
         elif extraction is not None and extraction.metrics:
             # We have monetary metrics but no consensus expectation
-            has_large_monetary = any(
-                m.normalized_value >= 1e9 for m in extraction.metrics if not m.is_percentage
+            max_monetary = max(
+                (m.normalized_value for m in extraction.metrics if not m.is_percentage),
+                default=0.0,
             )
-            mag_score = 0.60 if has_large_monetary else 0.40
+            if max_monetary >= 5e10:     # >= Rs 5,000 cr or $50B
+                mag_score = 0.85
+            elif max_monetary >= 1e10:   # >= Rs 1,000 cr or $10B
+                mag_score = 0.75
+            elif max_monetary >= 1e9:    # >= Rs 100 cr or $1B
+                mag_score = 0.60
+            else:
+                mag_score = 0.40
 
         # 3. Forward-looking Guidance Score
         fwd_score = 0.20
@@ -151,9 +159,9 @@ class FinancialMaterialityEngine:
         composite = round(max(0.0, min(1.0, composite)), 3)
 
         # Determine Tier
-        if composite < 0.35:
+        if composite < 0.28:
             tier = MaterialityTier.TIER_1_ROUTINE
-        elif composite < 0.70:
+        elif composite < 0.50:
             tier = MaterialityTier.TIER_2_MODERATE
         else:
             tier = MaterialityTier.TIER_3_HIGH

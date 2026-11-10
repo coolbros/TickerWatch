@@ -155,17 +155,18 @@ class FinancialEventClassifier:
             # Earnings & Results
             EventSubtype.EARNINGS_ANNOUNCEMENT: {
                 "patterns": [
-                    r"\b(financial\s+results|q[1-4]\s+(results|net\s+profit|pat|earnings)|quarterly\s+results|audited\s+results)\b",
-                    r"\b(net\s+profit\s+(rises|falls|jumps|drops|up|down)|pat\s+(up|down|rises|falls))\b",
-                    r"\b(posts\s+profit|reports\s+loss|quarterly\s+profit)\b",
+                    r"\b(financial\s+results|q[1-4]\s+(results|net\s+profit|pat|earnings|net\s+income)|quarterly\s+(results|profit|earnings|revenue|net\s+income)|audited\s+results)\b",
+                    r"\b(net\s+profit|pat|consolidated\s+profit|standalone\s+profit|quarterly\s+net\s+income)\s+(rises|falls|jumps|drops|up|down|surges|soars|grows|slumps|dips|climbs)\b",
+                    r"\b(posts\s+(?:\([^\)]+\)\s+)?profit|reports\s+(?:\([^\)]+\)\s+)?profit|posts\s+(?:\([^\)]+\)\s+)?loss|reports\s+(?:\([^\)]+\)\s+)?loss)\b",
+                    r"\b(quarterly\s+revenue\s+of|operating\s+profit\s+rises)\b",
                 ],
-                "keywords": ["earnings", "financial results", "quarterly profit", "pat", "ebitda", "net profit"],
-                "base_confidence": 0.90,
+                "keywords": ["earnings", "financial results", "quarterly profit", "pat", "ebitda", "net profit", "net income"],
+                "base_confidence": 0.95,
             },
             # Guidance
             EventSubtype.GUIDANCE_REVISION: {
                 "patterns": [
-                    r"\b(cuts\s+guidance|raises\s+guidance|lowers\s+outlook|revenue\s+guidance|forecast\s+revision)\b",
+                    r"\b(cuts\s+guidance|raises\s+guidance|lowers\s+outlook|revenue\s+guidance|forecast\s+revision|cuts\s+revenue\s+guidance)\b",
                 ],
                 "keywords": ["guidance", "outlook revision", "revenue forecast", "lowers guidance", "raises guidance"],
                 "base_confidence": 0.85,
@@ -173,26 +174,26 @@ class FinancialEventClassifier:
             # Dividend
             EventSubtype.DIVIDEND_ANNOUNCEMENT: {
                 "patterns": [
-                    r"\b(recommends\s+dividend|declares\s+dividend|special\s+dividend|interim\s+dividend)\b",
+                    r"\b(recommends\s+dividend|declares\s+dividend|special\s+dividend|interim\s+dividend|recommends\s+special\s+dividend)\b",
                 ],
-                "keywords": ["dividend", "interim dividend", "dividend payout"],
-                "base_confidence": 0.90,
+                "keywords": ["dividend", "interim dividend", "dividend payout", "special dividend"],
+                "base_confidence": 0.88,
             },
             # Buyback
             EventSubtype.BUYBACK: {
                 "patterns": [
-                    r"\b(share\s+buyback|approves\s+buyback|tender\s+offer\s+buyback)\b",
+                    r"\b(share\s+buyback|approves\s+buyback|tender\s+offer\s+buyback|share\s+repurchase|repurchase\s+program|authorizes\s+buyback)\b",
                 ],
-                "keywords": ["buyback", "share repurchase", "tender offer"],
+                "keywords": ["buyback", "share repurchase", "tender offer", "repurchase program"],
                 "base_confidence": 0.90,
             },
             # Order / Contract Win
             EventSubtype.CONTRACT_ORDER_WIN: {
                 "patterns": [
-                    r"\b(bags\s+order|wins\s+contract|secures\s+deal|awarded\s+contract|order\s+win|order\s+worth)\b",
+                    r"\b(bags\s+order|wins\s+contract|secures\s+deal|secures\s+order|awarded\s+contract|awards\s+contract|order\s+win|order\s+worth)\b",
                     r"\b(signs\s+pact|commercial\s+agreement\s+worth)\b",
                 ],
-                "keywords": ["bags order", "wins contract", "secures deal", "order win", "awarded contract"],
+                "keywords": ["bags order", "wins contract", "secures deal", "order win", "awarded contract", "secures order"],
                 "base_confidence": 0.90,
             },
             # M&A
@@ -214,16 +215,16 @@ class FinancialEventClassifier:
             # Regulatory / Investigation
             EventSubtype.REGULATORY_INVESTIGATION: {
                 "patterns": [
-                    r"\b(sebi\s+order|show\s+cause\s+notice|probe\s+into|raids|inspection|enforcement\s+action)\b",
+                    r"\b(sebi\s+order|show\s+cause\s+notice|probe\s+into|raids|inspection|enforcement\s+action|sebi\s+penalty|penalty\s+of|insider\s+trading)\b",
                 ],
-                "keywords": ["show cause", "investigation", "sebi penalty", "probe"],
+                "keywords": ["show cause", "investigation", "sebi penalty", "probe", "insider trading"],
                 "base_confidence": 0.85,
             },
             # Interest Rate / Monetary Policy
             EventSubtype.INTEREST_RATE_DECISION: {
                 "patterns": [
-                    r"\b(repo\s+rate|rbi\s+monetary\s+policy|mpc\s+meeting|rate\s+hike|rate\s+cut|keeps\s+rates\s+unchanged)\b",
-                    r"\b(interest\s+rate\s+decision|policy\s+stance)\b",
+                    r"\b(repo\s+rate|rbi\s+monetary\s+policy|mpc\s+meeting|rate\s+hike|rate\s+cut|keeps\s+rates\s+unchanged|keeps\s+repo\s+rate\s+unchanged)\b",
+                    r"\b(interest\s+rate\s+decision|monetary\s+policy\s+stance)\b",
                 ],
                 "keywords": ["repo rate", "mpc", "monetary policy", "rate hike", "rate cut"],
                 "base_confidence": 0.95,
@@ -233,24 +234,24 @@ class FinancialEventClassifier:
                 "patterns": [
                     r"\b(cpi\s+inflation|retail\s+inflation|wholesale\s+inflation|wpi\s+inflation|consumer\s+price\s+index)\b",
                 ],
-                "keywords": ["cpi inflation", "retail inflation", "inflation rate"],
+                "keywords": ["cpi inflation", "retail inflation", "inflation rate", "consumer price index"],
                 "base_confidence": 0.90,
             },
-            # Capex
+            # Capex & Expansion
             EventSubtype.CAPITAL_EXPENDITURE: {
                 "patterns": [
-                    r"\b(capital\s+expenditure|capex\s+plan|investment\s+of\s+rs|to\s+invest\s+rs)\b",
+                    r"\b(capital\s+expenditure|capex\s+plan|capex\s+commitment|investment\s+of\s+rs|to\s+invest\s+rs|expansion\s+strategy|capacity\s+expansion)\b",
                 ],
-                "keywords": ["capex", "capital expenditure", "green energy investment"],
+                "keywords": ["capex", "capital expenditure", "green energy investment", "expansion strategy"],
                 "base_confidence": 0.85,
             },
             # Routine
             EventSubtype.ROUTINE_ADMINISTRATIVE: {
                 "patterns": [
-                    r"\b(board\s+meeting\s+intimation|trading\s+window\s+closure|loss\s+of\s+share\s+certificate|postal\s+ballot)\b",
+                    r"\b(board\s+meeting\s+intimation|trading\s+window\s+closure|trading\s+window|loss\s+of\s+share\s+certificate|duplicate\s+share\s+certificate|postal\s+ballot|intimation\s+of\s+board\s+meeting|date\s+of\s+annual\s+general\s+meeting|schedule\s+of\s+analyst)\b",
                 ],
-                "keywords": ["board meeting intimation", "trading window", "share certificate"],
-                "base_confidence": 0.80,
+                "keywords": ["board meeting intimation", "trading window", "share certificate", "postal ballot", "analyst meeting", "annual general meeting"],
+                "base_confidence": 0.92,
             },
         }
 
@@ -292,6 +293,20 @@ class FinancialEventClassifier:
                 primary_subtype=EventSubtype.ROUTINE_ADMINISTRATIVE,
                 confidence=0.50,
                 severity_score=0.1,
+                classifier_type="DETERMINISTIC_RULE_HEAD",
+            )
+
+        # Precedence Override: Routine Board Meeting Intimations
+        if re.search(
+            r"\b(intimation\s+of\s+board\s+meeting|board\s+meeting\s+to\s+consider|trading\s+window\s+closure|loss\s+of\s+share\s+certificate|duplicate\s+share\s+certificate)\b",
+            combined,
+        ):
+            return EventClassificationResult(
+                primary_family=EventPrimaryFamily.GENERAL_CORPORATE,
+                primary_subtype=EventSubtype.ROUTINE_ADMINISTRATIVE,
+                confidence=0.95,
+                severity_score=0.10,
+                evidence_keywords=["board meeting intimation"],
                 classifier_type="DETERMINISTIC_RULE_HEAD",
             )
 

@@ -156,7 +156,11 @@ class FinancialNLPPipeline:
         )
 
         # 5. Composite Materiality Evaluation
-        is_index_constituent = bool(instrument_id in ("RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "LT", "SBIN"))
+        index_names = {
+            "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "LT", "SBIN",
+            "BHARTIARTL", "ITC", "KOTAKBANK", "TATAMOTORS", "AAPL", "AMZN", "MSFT", "GOOGL", "META"
+        }
+        is_index_constituent = bool(instrument_id in index_names)
         materiality = self.materiality_engine.evaluate_materiality(
             classification=classification,
             extraction=extraction,

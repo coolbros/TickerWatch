@@ -1,0 +1,16 @@
+{
+  "total_test_cases": 52,
+  "entity_precision": 0.9211,
+  "entity_recall": 0.9459,
+  "entity_f1": 0.9333,
+  "ticker_collision_false_positive_rate": 0.0,
+  "event_classification_accuracy": 0.9423,
+  "numerical_extraction_accuracy": 1.0,
+  "materiality_tier_accuracy": 0.7692,
+  "latency_p50_us": 287.0,
+  "latency_p95_us": 428.0,
+  "latency_p99_us": 4604.0,
+  "memory_rss_mb": 32.18,
+  "all_gates_passed": true,
+  "evaluation_timestamp": "2026-11-10T03:17:09.901851Z"
+}
