@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     )
 
     # Orchestrator & Polling
+    start_scheduler: bool = Field(
+        default=True,
+        description="Whether the FastAPI application lifespan automatically starts background connector pollers"
+    )
     ingestion_poll_interval_seconds: int = Field(default=300, ge=10)
     http_timeout_seconds: float = Field(default=20.0, ge=1.0)
     max_connector_concurrency: int = Field(default=2, ge=1)
@@ -120,10 +124,16 @@ class Settings(BaseSettings):
                 continue
             if ":" in item:
                 cik, ticker = item.split(":", 1)
+                clean_cik = cik.strip()
+                if clean_cik.upper().startswith("CIK"):
+                    clean_cik = clean_cik[3:]
                 # Pad CIK to 10 digits as required by SEC EDGAR
-                tracked[cik.strip().zfill(10)] = ticker.strip().upper()
+                tracked[clean_cik.zfill(10)] = ticker.strip().upper()
             else:
-                tracked[item.zfill(10)] = "UNKNOWN"
+                clean_cik = item.strip()
+                if clean_cik.upper().startswith("CIK"):
+                    clean_cik = clean_cik[3:]
+                tracked[clean_cik.zfill(10)] = "UNKNOWN"
         return tracked
 
     @field_validator("sec_user_agent")

@@ -22,6 +22,7 @@
 | **ADR-008** | CPU-First Optimization; Defer FPGA Acceleration to Empirical Bottleneck | **ACCEPTED** | 2026-11-09 | Rapid iteration speed, maintainability, cost efficiency |
 | **ADR-009** | Preserve Existing Ingestion Foundation with Zero Destructive Refactoring | **ACCEPTED** | 2026-11-09 | Architectural stability, code reuse, backwards compatibility |
 | **ADR-010** | Enforce Purged Walk-Forward Splits; Ban Random Cross-Validation | **ACCEPTED** | 2026-11-09 | Elimination of temporal information leakage |
+| **ADR-011** | FastAPI Lifespan Poller Decoupling and Offline Test Isolation | **ACCEPTED** | 2026-11-09 | Deterministic offline testing; external socket timeout elimination |
 
 ---
 
@@ -126,6 +127,16 @@
 - **Rationale:** Guarantees that backtested performance reflects real-world operational conditions where future events are completely unknown.
 - **Alternatives Considered:**
   - *Standard out-of-bag train/test split:* Leaks regime shifts and macroeconomic trends across partitions.
+
+---
+
+### ADR-011: FastAPI Lifespan Poller Decoupling and Offline Test Isolation
+- **Context:** `create_app()` previously started background connector polling tasks upon FastAPI application lifespan startup. In offline test environments, this caused `TestClient` API tests to issue real outbound network calls to external feeds.
+- **Decision:** Introduce `start_scheduler: bool = True` in `Settings` and an optional `start_scheduler: Optional[bool] = None` parameter in `create_app()`. Default behavior remains identical for production deployments (`start_scheduler=True`). In automated tests, the application factory is called with `start_scheduler=False`, preventing background pollers from running during unit tests while keeping the poller lifecycle independently testable.
+- **Rationale:** Ensures that the entire default automated test suite runs completely offline with zero external network access, preventing socket timeouts and nondeterministic test failures.
+- **Alternatives Considered:**
+  - *Completely disabling background polling globally:* Rejected because production startup requires autonomous polling.
+  - *Patching `asyncio.create_task`:* Fragile and pollutes global event loop state.
 
 ---
 

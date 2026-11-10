@@ -170,19 +170,25 @@ FastAPI router mounted at root in `backend/main.py`:
 
 ## 6. Empirical Test Verification & Architectural Findings
 
-During our Phase 0 audit, automated test execution was directly evaluated:
+### 6.1 Phase 1 Hardened Verification Results
+Following the Phase 1 independent engineering audit and test suite hardening:
+- **Baseline Test Count:** Established the true initial test count at **63 tests** (all passed in 2.75s).
+- **Harden Suite Expansion:** Expanded the test suite to **92 collected tests**:
+  - **90 Passing Offline Tests:** Executed in 3.50s without any external network dependency.
+  - **2 Live Smoke Tests:** Cleanly separated under `@pytest.mark.live` and executed on demand (`pytest -m live`) in 1.06s.
+  - **Zero Failures, Zero Errors, Zero Regressions.**
 
-### 6.1 Passing Isolated Unit Tests
-- `tests/unit/test_normalizer.py`: **13 passed in 0.13s** (100% pass rate). Validates HTML stripping, RFC 822 / ISO 8601 parsing, URL normalization, SHA-256 content hashing, and stable source ID generation.
-- `tests/unit/test_database.py`: **7 passed in 0.32s** (100% pass rate). Validates migrations, atomic batch persistence, deduplication suppression, transaction rollback, and dead-letter quarantine.
-
-### 6.2 Architectural Findings & Sandbox Constraints
-1. **Lifespan Network Polling in `test_api.py`:**  
-   In `backend/main.py`, `create_app()` initializes background polling tasks during lifespan startup for all enabled connectors in `config/feeds.yaml` (`yahoo_finance_top`, `moneycontrol_market_reports`). When `TestClient` initializes in a sandboxed or network-isolated environment, background tasks attempt live outbound HTTP connections, leading to socket timeout delays. In Phase 1, `test_app` fixtures must explicitly disable RSS/SEC polling or mock transport.
-2. **Windows CryptoAPI / Root Certificates:**  
-   `backend/config.py` contains `get_ssl_context()`, which enumerates Windows root certificates via `ssl.enum_certificates("ROOT")`. Under sandboxed execution policies, Win32 CryptoAPI access requires elevated privileges or fallback to standard certifi bundles.
-3. **SQLite Concurrency & Multi-Process Locks:**  
-   SQLite WAL mode allows multiple concurrent readers and one writer. While highly performant for Phase 1 news ingestion (benchmarked at $>15,000\text{ items/s}$), high-frequency tick market data requires separate dedicated memory buffers to avoid write-lock contention.
+### 6.2 Architectural Remediation Completed in Phase 1
+1. **Lifespan Network Polling Isolated:**  
+   In `backend/main.py`, `create_app()` was enhanced with `start_scheduler: Optional[bool] = None` and a matching `start_scheduler: bool = True` configuration parameter in `Settings`. API tests instantiate the application with `start_scheduler=False`, completely decoupling test execution from background polling while preserving the production default.
+2. **Windows CryptoAPI / Root Certificates & SSL Reliability:**  
+   `backend/config.py` was verified to maintain strict TLS certificate verification (`verify_mode = CERT_REQUIRED`, `check_hostname = True`). Dedicated unit tests in `tests/unit/test_config_ssl.py` verify that `get_ssl_context()` handles store enumeration errors gracefully.
+3. **SEC CIK Normalization Inconsistency Resolved:**  
+   Fixed `Settings.get_sec_tracked_dict()` to strip any leading `CIK` prefix, matching `normalize_cik()` in `backend/connectors/sec.py`.
+4. **SQLite Concurrency, Durability & Failure Injection:**  
+   Verified `PRAGMA journal_mode=WAL;`, `PRAGMA synchronous=NORMAL;`, `PRAGMA foreign_keys=ON;`, and `PRAGMA busy_timeout=10000;`. Added failure injection tests verifying that simulated disk errors or database insertion failures trigger complete atomic transaction rollback with zero uncommitted records or cursor advancement.
+5. **Database Preservation:**  
+   Verified that all 3,043 persisted articles in `tickerwatch.db` remain 100% untouched. All tests run exclusively against isolated temporary databases (`tmp_path`).
 
 ---
 

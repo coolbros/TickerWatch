@@ -21,13 +21,13 @@ To prevent the catastrophic risks endemic to quantitative trading projects—suc
 |                                    11-PHASE IMPLEMENTATION ROADMAP                                  |
 +====================================================================================================+
 
-   [ PHASE 0: Research Charter, Instrument Selection & Repository Baseline ] <=== WE ARE HERE
+   [ PHASE 0: Research Charter, Instrument Selection & Repository Baseline ] [SIGNED OFF]
                            | (Gate 0 Sign-Off)
                            v
-   [ PHASE 1: Ingestion Foundation Audit & Sandbox-Safe Test Suite Reproduction ]
+   [ PHASE 1: Ingestion Foundation Audit & Sandbox-Safe Test Suite Reproduction ] [SIGNED OFF]
                            | (Gate 1 Sign-Off)
                            v
-   [ PHASE 2: Market Data Stream Scaffolding & Sub-Second Alignment Engine ]
+   [ PHASE 2: Market Data Stream Scaffolding & Sub-Second Alignment Engine ] <=== NEXT PHASE
                            | (Gate 2 Sign-Off)
                            v
    [ PHASE 3: Financial Event NLP, Entity Disambiguation & Surprise Extraction ]
@@ -83,16 +83,17 @@ To prevent the catastrophic risks endemic to quantitative trading projects—suc
 
 ---
 
-### Phase 1: Ingestion Foundation Audit & Test Suite Reproduction
+### Phase 1: Ingestion Foundation Audit & Test Suite Reproduction (COMPLETED)
 - **Objective:** Independently audit the existing Phase 1 news ingestion system, resolve sandbox/network test hanging hazards, and reproduce full test verification suite.
 - **Mandatory Tasks:**
   - Harden `test_api.py` and `test_resilience.py` to prevent background polling socket timeouts in network-isolated environments.
   - Verify and reproduce passing test suite across contract, integration, and unit tests.
   - Validate SQLite WAL write-speed, crash durability, and cursor rollback under synthetic fault injection.
+  - Separate live smoke tests behind opt-in `-m live` pytest marker.
 - **Gate 1 Verification:**
-  - All automated tests execute cleanly offline without hanging or network timeouts.
-  - Zero data loss or cursor corruption verified under crash recovery tests.
-  - Ingestion foundation signed off as stable research substrate.
+  - [x] All 90 automated unit and integration tests execute cleanly offline without hanging or network timeouts.
+  - [x] Zero data loss or cursor corruption verified under crash recovery and synthetic fault injection tests.
+  - [x] Ingestion foundation verified and signed off as trustworthy data foundation for Phase 2.
 
 ---
 

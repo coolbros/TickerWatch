@@ -28,6 +28,10 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "live: Live external integration tests requiring real outbound network access (opt-in only via pytest -m live)",
+]
+addopts = "-m 'not live'"
 filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::starlette.testclient.StarletteDeprecationWarning",
