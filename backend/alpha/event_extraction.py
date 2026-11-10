@@ -42,6 +42,8 @@ class FinancialMetricType(str, Enum):
     CAPEX = "CAPEX"
     DIVIDEND_PER_SHARE = "DIVIDEND_PER_SHARE"
     TARGET_PRICE = "TARGET_PRICE"
+    EXPENSE = "EXPENSE"
+    DEBT = "DEBT"
     OTHER = "OTHER"
 
 
@@ -51,7 +53,9 @@ class ExtractedMetricValue(BaseModel):
     metric_type: FinancialMetricType
     raw_text: str
     normalized_value: float
+    original_value: Optional[float] = None
     currency: CurrencyUnit = CurrencyUnit.UNKNOWN
+    original_currency: CurrencyUnit = CurrencyUnit.UNKNOWN
     unit: str = ""
     is_percentage: bool = False
     is_basis_points: bool = False
@@ -59,7 +63,9 @@ class ExtractedMetricValue(BaseModel):
     range_low: Optional[float] = None
     range_high: Optional[float] = None
     comparison_period: Optional[TemporalComparison] = None
+    reporting_period: Optional[str] = None
     direction: DirectionChange = DirectionChange.UNKNOWN
+    text_section: str = "HEADLINE"  # "HEADLINE" or "BODY"
     start_char: int = -1
     end_char: int = -1
     confidence: float = Field(default=0.85, ge=0.0, le=1.0)
@@ -69,6 +75,7 @@ class FinancialExtractionResult(BaseModel):
     """Aggregated financial extraction output for a document."""
 
     headline: str
+    body_text: Optional[str] = None
     metrics: List[ExtractedMetricValue] = Field(default_factory=list)
     primary_metric: Optional[ExtractedMetricValue] = None
     confidence: float = Field(default=0.80, ge=0.0, le=1.0)
@@ -122,7 +129,8 @@ class FinancialEventExtractor:
     """
     High-precision financial entity & numerical extractor.
     Extracts monetary quantities (Lakh, Crore, Million, Billion), percentage changes,
-    directional guidance, and comparative periods with explicit char spans.
+    directional guidance, and comparative periods with explicit char spans across
+    both headlines and body text.
     """
 
     def __init__(self) -> None:
@@ -130,21 +138,29 @@ class FinancialEventExtractor:
         self._unit_re = r"(lakhs?|lacs?|crores?|cr|arab|thousand|million|mn|billion|bn|trillion|tn|k|m|b|t)"
         self._number_re = r"(\d+(?:,\d+)*(?:\.\d+)?)"
 
-    def extract_metrics(self, text: str) -> FinancialExtractionResult:
-        """Extract all financial metrics, values, directions, and comparisons from text."""
+    def extract_metrics(self, text: str, body_text: Optional[str] = None) -> FinancialExtractionResult:
+        """
+        Extract all financial metrics, values, directions, and comparisons from full document.
+        Processes headline first, then extends extraction to body text with intelligent deduplication.
+        """
         metrics: List[ExtractedMetricValue] = []
 
-        # 1. Range Extractions (e.g., 'between Rs 500 crore and Rs 600 crore' or 'Rs 500 - 600 cr')
-        range_metrics, range_spans = self._extract_ranges(text)
-        metrics.extend(range_metrics)
+        # 1. Headline extractions
+        hl_metrics = self._extract_section(text, section_name="HEADLINE")
+        metrics.extend(hl_metrics)
 
-        # 2. Standalone Monetary and Quantitative Values (excluding covered range spans)
-        single_metrics = self._extract_monetary_values(text, ignore_spans=range_spans)
-        metrics.extend(single_metrics)
-
-        # 3. Percentages & Basis Points
-        pct_metrics = self._extract_percentages(text, ignore_spans=range_spans)
-        metrics.extend(pct_metrics)
+        # 2. Body extractions (if body_text provided)
+        if body_text and body_text.strip():
+            body_metrics = self._extract_section(body_text.strip(), section_name="BODY")
+            # Deduplicate body metrics that duplicate headline metrics
+            for bm in body_metrics:
+                is_duplicate = any(
+                    hm.metric_type == bm.metric_type
+                    and abs(hm.normalized_value - bm.normalized_value) < max(1.0, 0.01 * abs(hm.normalized_value))
+                    for hm in hl_metrics
+                )
+                if not is_duplicate:
+                    metrics.append(bm)
 
         # Disambiguate and rank primary metric
         primary_metric = self._select_primary_metric(metrics, text)
@@ -155,40 +171,53 @@ class FinancialEventExtractor:
 
         return FinancialExtractionResult(
             headline=text,
+            body_text=body_text,
             metrics=metrics,
             primary_metric=primary_metric,
             confidence=round(overall_conf, 3),
             extraction_metadata={
                 "metric_count": len(metrics),
+                "headline_metrics_count": len(hl_metrics),
                 "has_monetary": any(m.currency != CurrencyUnit.UNKNOWN for m in metrics),
                 "has_percentage": any(m.is_percentage for m in metrics),
                 "has_range": any(m.is_range for m in metrics),
+                "processed_body": bool(body_text),
             },
         )
 
-    def _extract_ranges(self, text: str) -> Tuple[List[ExtractedMetricValue], List[Tuple[int, int]]]:
+    def _extract_section(self, text: str, section_name: str = "HEADLINE") -> List[ExtractedMetricValue]:
+        """Extract metrics from a specific document section."""
+        extracted: List[ExtractedMetricValue] = []
+
+        # 1. Range Extractions (e.g., 'between Rs 500 crore and Rs 600 crore' or 'Rs 500 - 600 cr')
+        range_metrics, range_spans = self._extract_ranges(text, section_name=section_name)
+        extracted.extend(range_metrics)
+
+        # 2. Standalone Monetary and Quantitative Values (excluding covered range spans)
+        single_metrics = self._extract_monetary_values(text, ignore_spans=range_spans, section_name=section_name)
+        extracted.extend(single_metrics)
+        all_monetary_spans = range_spans + [(m.start_char, m.end_char) for m in single_metrics]
+
+        # 3. Per-share monetary values (e.g. 'Rs 15 per share', 'dividend of $2.50 per share')
+        per_share_metrics = self._extract_per_share_values(
+            text, ignore_spans=all_monetary_spans, section_name=section_name
+        )
+        extracted.extend(per_share_metrics)
+        covered_for_pct = all_monetary_spans + [(m.start_char, m.end_char) for m in per_share_metrics]
+
+        # 4. Percentages & Basis Points
+        pct_metrics = self._extract_percentages(text, ignore_spans=covered_for_pct, section_name=section_name)
+        extracted.extend(pct_metrics)
+
+        return extracted
+
+    def _extract_ranges(
+        self, text: str, section_name: str = "HEADLINE"
+    ) -> Tuple[List[ExtractedMetricValue], List[Tuple[int, int]]]:
         """Extract numerical ranges like 'between Rs 500 cr and Rs 600 cr' or '500-600 crore'."""
         extracted: List[ExtractedMetricValue] = []
         covered_spans: List[Tuple[int, int]] = []
 
-        # Pattern: between [curr] X [unit] and [curr] Y [unit]
-        pattern_between = re.compile(
-            rf"\bbetween\s+{self._currency_re}?\s*{self._number_re}\s*{self._unit_re}?\s+and\s+{self._currency_re}?\s*{self._number_re}\s*{self._unit_re}?\b",
-            re.IGNORECASE,
-        )
-        for m in pattern_between.finditer(text):
-            low_curr = m.group(1) or m.group(5)
-            low_val_str = m.group(2).replace(",", "")
-            low_unit = m.group(3) or m.group(6)
-            high_curr = m.group(5) or low_curr
-            high_val_str = m.group(6) if m.group(6) and not m.group(6).isalpha() else m.group(6) # wait
-            # Let's inspect groups carefully:
-            # 1: curr1, 2: num1, 3: unit1, 4: curr2, 5: num2, 6: unit2
-            # Let's write cleaner parsing
-            pass
-
-        # Cleaner regex pattern for ranges:
-        # Pattern A: (Rs / $) (\d+) (-|to|and) (\d+) (crore / cr / million)
         range_pattern = re.compile(
             rf"(?:between\s+)?(?P<curr1>{self._currency_re})?\s*(?P<num1>{self._number_re})\s*(?P<unit1>{self._unit_re})?\s*(?:-|to|\band\b)\s*(?P<curr2>{self._currency_re})?\s*(?P<num2>{self._number_re})\s*(?P<unit2>{self._unit_re})\b",
             re.IGNORECASE,
@@ -218,19 +247,24 @@ class FinancialEventExtractor:
             metric_type = self._infer_metric_type(text, m.start(), m.end())
             direction = self._infer_direction(text, m.start(), m.end())
             comp = self._infer_comparison(text, m.start(), m.end())
+            rep_period = self._infer_reporting_period(text, m.start(), m.end())
 
             extracted.append(
                 ExtractedMetricValue(
                     metric_type=metric_type,
                     raw_text=m.group(0),
                     normalized_value=midpoint,
+                    original_value=(n1 + n2) / 2.0,
                     currency=currency,
+                    original_currency=currency,
                     unit=unit_str,
                     is_range=True,
                     range_low=val_low,
                     range_high=val_high,
                     comparison_period=comp,
+                    reporting_period=rep_period,
                     direction=direction,
+                    text_section=section_name,
                     start_char=m.start(),
                     end_char=m.end(),
                     confidence=0.92,
@@ -240,13 +274,11 @@ class FinancialEventExtractor:
         return extracted, covered_spans
 
     def _extract_monetary_values(
-        self, text: str, ignore_spans: List[Tuple[int, int]]
+        self, text: str, ignore_spans: List[Tuple[int, int]], section_name: str = "HEADLINE"
     ) -> List[ExtractedMetricValue]:
         """Extract standalone monetary quantities with currency and Indian/Western units."""
         extracted: List[ExtractedMetricValue] = []
 
-        # Match: [is_neg] [curr] [num] [unit]
-        # Handles parenthesized: (Rs 120 cr) or -(Rs 120 cr) or Rs -120 cr
         pattern = re.compile(
             rf"(?P<neg>-|\()?\s*(?P<curr>{self._currency_re})?\s*(?P<num>{self._number_re})\s*(?P<unit>{self._unit_re})\b(?P<close_paren>\))?",
             re.IGNORECASE,
@@ -265,8 +297,7 @@ class FinancialEventExtractor:
 
             # Check loss / negative indications
             is_negative = bool(m.group("neg") or (m.group("close_paren") and "(" in m.group(0)))
-            # Also check if preceded by 'loss of' or 'net loss'
-            prefix_window = text[max(0, start - 20) : start].lower()
+            prefix_window = text[max(0, start - 25) : start].lower()
             if "loss" in prefix_window or "deficit" in prefix_window:
                 is_negative = True
 
@@ -275,17 +306,22 @@ class FinancialEventExtractor:
             metric_type = self._infer_metric_type(text, start, end)
             direction = self._infer_direction(text, start, end)
             comp = self._infer_comparison(text, start, end)
+            rep_period = self._infer_reporting_period(text, start, end)
 
             extracted.append(
                 ExtractedMetricValue(
                     metric_type=metric_type,
                     raw_text=m.group(0),
                     normalized_value=norm_val,
+                    original_value=-raw_num if is_negative else raw_num,
                     currency=currency,
+                    original_currency=currency,
                     unit=u_str,
                     is_range=False,
                     comparison_period=comp,
+                    reporting_period=rep_period,
                     direction=direction,
+                    text_section=section_name,
                     start_char=start,
                     end_char=end,
                     confidence=0.90 if currency != CurrencyUnit.UNKNOWN else 0.80,
@@ -294,13 +330,63 @@ class FinancialEventExtractor:
 
         return extracted
 
+    def _extract_per_share_values(
+        self, text: str, ignore_spans: List[Tuple[int, int]], section_name: str = "HEADLINE"
+    ) -> List[ExtractedMetricValue]:
+        """Extract per-share quantities (e.g. dividend per share, EPS, target prices)."""
+        extracted: List[ExtractedMetricValue] = []
+
+        pattern = re.compile(
+            rf"(?P<curr>{self._currency_re})?\s*(?P<num>{self._number_re})\s*(?P<unit>per\s+share|/\s*share|\bapiece\b)",
+            re.IGNORECASE,
+        )
+
+        for m in pattern.finditer(text):
+            start, end = m.start(), m.end()
+            if self._is_span_covered(start, end, ignore_spans):
+                continue
+
+            c_str = m.group("curr") or ""
+            currency = self._resolve_currency(c_str)
+            raw_num = float(m.group("num").replace(",", ""))
+
+            metric_type = self._infer_metric_type(text, start, end)
+            if metric_type == FinancialMetricType.OTHER:
+                metric_type = FinancialMetricType.DIVIDEND_PER_SHARE
+            direction = self._infer_direction(text, start, end)
+            comp = self._infer_comparison(text, start, end)
+            rep_period = self._infer_reporting_period(text, start, end)
+
+            extracted.append(
+                ExtractedMetricValue(
+                    metric_type=metric_type,
+                    raw_text=m.group(0),
+                    normalized_value=raw_num,
+                    original_value=raw_num,
+                    currency=currency,
+                    original_currency=currency,
+                    unit="per share",
+                    is_percentage=False,
+                    is_basis_points=False,
+                    is_range=False,
+                    comparison_period=comp,
+                    reporting_period=rep_period,
+                    direction=direction,
+                    text_section=section_name,
+                    start_char=start,
+                    end_char=end,
+                    confidence=0.90 if currency != CurrencyUnit.UNKNOWN else 0.85,
+                )
+            )
+
+        return extracted
+
     def _extract_percentages(
-        self, text: str, ignore_spans: List[Tuple[int, int]]
+        self, text: str, ignore_spans: List[Tuple[int, int]], section_name: str = "HEADLINE"
     ) -> List[ExtractedMetricValue]:
         """Extract percentages and basis points."""
         extracted: List[ExtractedMetricValue] = []
 
-        # Matches: [+-]? \d+(\.\d+)? (%|percent|pct|bps|basis points)
         pattern = re.compile(
             rf"(?P<sign>[+-])?\s*(?P<num>{self._number_re})\s*(?P<unit>%|percent\b|pct\b|bps\b|basis\s+points\b)",
             re.IGNORECASE,
@@ -320,24 +406,28 @@ class FinancialEventExtractor:
 
             is_negative = sign == "-" or "down" in prefix_window or "falls" in prefix_window or "drop" in prefix_window
             if is_bps:
-                norm_val = -(raw_val * 0.01) if is_negative else (raw_val * 0.01) # percentage equivalent
+                norm_val = -(raw_val * 0.01) if is_negative else (raw_val * 0.01)
             else:
                 norm_val = -raw_val if is_negative else raw_val
 
             metric_type = self._infer_metric_type(text, start, end)
             direction = self._infer_direction(text, start, end)
             comp = self._infer_comparison(text, start, end)
+            rep_period = self._infer_reporting_period(text, start, end)
 
             extracted.append(
                 ExtractedMetricValue(
                     metric_type=metric_type if metric_type != FinancialMetricType.OTHER else FinancialMetricType.MARGIN,
                     raw_text=m.group(0),
                     normalized_value=norm_val,
+                    original_value=-raw_val if is_negative else raw_val,
                     unit="bps" if is_bps else "%",
                     is_percentage=not is_bps,
                     is_basis_points=is_bps,
                     comparison_period=comp,
+                    reporting_period=rep_period,
                     direction=direction,
+                    text_section=section_name,
                     start_char=start,
                     end_char=end,
                     confidence=0.88,
@@ -357,6 +447,16 @@ class FinancialEventExtractor:
         clean = curr_str.lower().strip()
         return CURRENCY_SYMBOLS.get(clean, CurrencyUnit.UNKNOWN)
 
+    def _infer_reporting_period(self, text: str, start: int, end: int) -> Optional[str]:
+        """Infer explicit financial reporting period like FY26, Q3, etc."""
+        window_start = max(0, start - 40)
+        window_end = min(len(text), end + 40)
+        context = text[window_start:window_end].upper()
+        match = re.search(r"\b(FY\d{2,4}|Q[1-4]|H[1-2]|9M)\b", context)
+        if match:
+            return match.group(1)
+        return None
+
     def _infer_metric_type(self, text: str, start: int, end: int) -> FinancialMetricType:
         """Infer financial metric type by finding the closest keyword to the value span."""
         window_start = max(0, start - 60)
@@ -364,16 +464,19 @@ class FinancialEventExtractor:
         window_text = text[window_start:window_end].lower()
         val_offset_in_window = start - window_start
 
+        # Priority keyword rules - order matters for compound terms
         keyword_rules = [
             (FinancialMetricType.MARGIN, ["operating margin", "ebitda margin", "gross margin", "margin"]),
-            (FinancialMetricType.NET_PROFIT_PAT, ["net profit", "pat", "bottomline", "net loss", "loss", "profit"]),
+            (FinancialMetricType.NET_PROFIT_PAT, ["net profit", "pat", "bottomline", "net loss", "loss", "profit", "net income"]),
             (FinancialMetricType.REVENUE, ["revenue", "turnover", "sales", "topline"]),
             (FinancialMetricType.EBITDA, ["ebitda", "operating profit"]),
             (FinancialMetricType.CONTRACT_VALUE, ["order win", "bags order", "contract worth", "deal worth", "awarded contract", "order", "deal"]),
-            (FinancialMetricType.CAPEX, ["capex", "capital expenditure", "plant setup", "investment"]),
+            (FinancialMetricType.CAPEX, ["capital expenditure", "capex", "plant setup", "investment"]),
             (FinancialMetricType.DIVIDEND_PER_SHARE, ["dividend", "dps"]),
             (FinancialMetricType.TARGET_PRICE, ["target price", "tp"]),
             (FinancialMetricType.EPS, ["eps", "earnings per share"]),
+            (FinancialMetricType.EXPENSE, ["total expense", "operating expenses", "operating expenditure", "costs", "expenses"]),
+            (FinancialMetricType.DEBT, ["total debt", "borrowings", "liabilities"]),
         ]
 
         best_metric = FinancialMetricType.OTHER
@@ -426,8 +529,10 @@ class FinancialEventExtractor:
         if not metrics:
             return None
 
-        # Prioritize Monetary metrics over pure percentages if present
-        # Priority order: NET_PROFIT_PAT > REVENUE > CONTRACT_VALUE > EBITDA > CAPEX > DIVIDEND > MARGIN > OTHER
+        # Prioritize headline metrics over body metrics if available
+        hl_metrics = [m for m in metrics if m.text_section == "HEADLINE"]
+        candidates = hl_metrics if hl_metrics else metrics
+
         priority_map = {
             FinancialMetricType.NET_PROFIT_PAT: 10,
             FinancialMetricType.REVENUE: 9,
@@ -436,12 +541,14 @@ class FinancialEventExtractor:
             FinancialMetricType.CAPEX: 6,
             FinancialMetricType.DIVIDEND_PER_SHARE: 5,
             FinancialMetricType.MARGIN: 4,
+            FinancialMetricType.EXPENSE: 4,
+            FinancialMetricType.DEBT: 4,
             FinancialMetricType.EPS: 3,
             FinancialMetricType.OTHER: 1,
         }
 
         return max(
-            metrics,
+            candidates,
             key=lambda m: (
                 priority_map.get(m.metric_type, 0),
                 1 if m.currency != CurrencyUnit.UNKNOWN else 0,

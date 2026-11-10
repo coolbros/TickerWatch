@@ -65,7 +65,7 @@ All quality control gates passed with significant margins.
 - Verified that post-dated expectations strictly trigger `ValueError` to prevent look-ahead bias.
 
 ### E. Materiality Calibration
-- Successfully separated routine administrative compliance filings ($0.18 - 0.23$, `TIER_1_ROUTINE`) from market-moving catalysts (quarterly earnings beats, central bank repo rate decisions, and mega capex plans $\ge 0.50$, `TIER_3_HIGH`).
+- Successfully separated routine administrative compliance filings ($[0.00, 0.35)$, `TIER_1_ROUTINE`) from moderate company catalysts ($[0.35, 0.70)$, `TIER_2_MODERATE`) and market-moving catalysts (quarterly earnings beats, central bank repo rate decisions, and mega capex plans $\ge 0.70$, `TIER_3_HIGH`).
 
 ---
 

@@ -19,6 +19,7 @@ from backend.alpha.event_extraction import (
     CurrencyUnit,
     DirectionChange,
     FinancialEventExtractor,
+    ExtractedMetricValue,
     FinancialMetricType,
     TemporalComparison,
     get_event_extractor,
@@ -505,3 +506,286 @@ class TestFinancialNLPPipeline:
         rep_reconstructed = FinancialEventRepresentation.model_validate(parsed_dict)
         assert rep_reconstructed.event_id == rep.event_id
         assert rep_reconstructed.composite_confidence == rep.composite_confidence
+
+
+# ============================================================================
+# 8. Phase 3 Remediation & Precision Invariance Tests (Phase 4 Entry Gate)
+# ============================================================================
+
+class TestPhase3Remediation:
+    """Verifies all remediation gates from Work Package A."""
+
+    def test_decision_timestamp_precedence_and_provenance(self):
+        """A1: Verify local_received_at_utc is strictly the decision timestamp even if publisher claims earlier."""
+        pub_time = datetime(2026, 1, 15, 9, 14, 0, tzinfo=timezone.utc)
+        obs_time = datetime(2026, 1, 15, 9, 14, 30, tzinfo=timezone.utc)
+        rcv_time = datetime(2026, 1, 15, 9, 15, 2, tzinfo=timezone.utc)
+        ing_time = datetime(2026, 1, 15, 9, 15, 5, tzinfo=timezone.utc)
+
+        news_evt = NewsEvent(
+            provider_id="reuters_wire",
+            source_name="Reuters Financial Wire",
+            source_url="https://reuters.com/markets/test",
+            headline="Infosys reports Q3 net profit surge of 15% YoY",
+            published_at_utc=pub_time,
+            provider_observed_at_utc=obs_time,
+            local_received_at_utc=rcv_time,
+            ingestion_completed_at_utc=ing_time,
+            local_monotonic_ns=123456789,
+            content_hash="infyhash999",
+        )
+
+        pipeline = get_nlp_pipeline()
+        rep = pipeline.process_news_event(news_evt)
+
+        # Operative decision timestamp must strictly match local receipt
+        assert rep.decision_timestamp == rcv_time
+        assert rep.timestamp_provenance is not None
+        assert rep.timestamp_provenance.published_at_utc == pub_time
+        assert rep.timestamp_provenance.provider_observed_at_utc == obs_time
+        assert rep.timestamp_provenance.local_received_at_utc == rcv_time
+        assert rep.timestamp_provenance.ingestion_completed_at_utc == ing_time
+
+    def test_outcome_maturity_and_lookahead_protection(self):
+        """A2: Verify immature 1d/5d historical returns are masked to None and not leaked into context."""
+        retriever = CausalHistoricalEventRetriever()
+
+        decision_time = datetime(2026, 3, 10, 12, 0, 0, tzinfo=timezone.utc)
+
+        # Case 1: Event 2 hours old (immature for both 1d and 5d)
+        t_2h = decision_time - timedelta(hours=2)
+        retriever.index_event(HistoricalEventRecord(
+            event_id="recent_2h",
+            timestamp=t_2h,
+            headline="L&T wins order worth Rs 1,000 crore",
+            instrument_id="LT",
+            event_subtype=EventSubtype.CONTRACT_ORDER_WIN,
+            materiality_score=0.72,
+            post_event_return_1d=0.035,  # 3.5% post-event return
+            post_event_return_5d=0.060,  # 6.0% return
+        ))
+
+        # Case 2: Event 2 days old (matured for 1d, immature for 5d)
+        t_2d = decision_time - timedelta(days=2)
+        retriever.index_event(HistoricalEventRecord(
+            event_id="past_2d",
+            timestamp=t_2d,
+            headline="L&T secures rail infrastructure contract worth Rs 2,000 crore",
+            instrument_id="LT",
+            event_subtype=EventSubtype.CONTRACT_ORDER_WIN,
+            materiality_score=0.75,
+            post_event_return_1d=0.020,  # matured!
+            post_event_return_5d=0.045,  # immature!
+        ))
+
+        # Case 3: Event 10 days old (matured for both 1d and 5d)
+        t_10d = decision_time - timedelta(days=10)
+        retriever.index_event(HistoricalEventRecord(
+            event_id="past_10d",
+            timestamp=t_10d,
+            headline="L&T bags domestic power grid order worth Rs 1,500 crore",
+            instrument_id="LT",
+            event_subtype=EventSubtype.CONTRACT_ORDER_WIN,
+            materiality_score=0.70,
+            post_event_return_1d=0.010,  # matured!
+            post_event_return_5d=0.030,  # matured!
+        ))
+
+        ctx = retriever.retrieve_comparable_events(
+            headline="L&T bags major industrial contract worth Rs 2,200 crore",
+            instrument_id="LT",
+            event_subtype=EventSubtype.CONTRACT_ORDER_WIN,
+            materiality_score=0.73,
+            decision_timestamp=decision_time,
+            top_k=5,
+        )
+
+        assert ctx.total_comparable_count == 3
+        matches_by_id = {m.event_id: m for m in ctx.matches}
+
+        # Verify recent_2h (2h ago): 1d and 5d outcomes must be MASKED to None!
+        assert matches_by_id["recent_2h"].post_event_return_1d is None
+        assert matches_by_id["recent_2h"].post_event_return_5d is None
+        assert matches_by_id["recent_2h"].is_1d_outcome_matured is False
+        assert matches_by_id["recent_2h"].is_5d_outcome_matured is False
+
+        # Verify past_2d (2d ago): 1d return preserved, 5d return MASKED!
+        assert matches_by_id["past_2d"].post_event_return_1d == 0.020
+        assert matches_by_id["past_2d"].post_event_return_5d is None
+        assert matches_by_id["past_2d"].is_1d_outcome_matured is True
+        assert matches_by_id["past_2d"].is_5d_outcome_matured is False
+
+        # Verify past_10d (10d ago): both 1d and 5d preserved!
+        assert matches_by_id["past_10d"].post_event_return_1d == 0.010
+        assert matches_by_id["past_10d"].post_event_return_5d == 0.030
+        assert matches_by_id["past_10d"].is_1d_outcome_matured is True
+        assert matches_by_id["past_10d"].is_5d_outcome_matured is True
+
+        # Mean historical return 1d must ONLY average matured returns (0.020 and 0.010) => 0.015
+        assert ctx.mean_historical_return_1d is not None
+        assert abs(ctx.mean_historical_return_1d - 0.015) < 1e-4
+
+        # Mean historical return 5d must ONLY average past_10d => 0.030
+        assert ctx.mean_historical_return_5d is not None
+        assert abs(ctx.mean_historical_return_5d - 0.030) < 1e-4
+
+    def test_full_document_extraction_and_deduplication(self):
+        """A3: Verify full-document extraction across headline and body with span preservation."""
+        extractor = FinancialEventExtractor()
+        headline = "L&T wins order worth Rs 2,500 crore from power sector"
+        body = (
+            "Larsen & Toubro announced that its energy division has bagged an order worth Rs 2,500 crore. "
+            "Additionally, the board approved an interim dividend of Rs 15 per share and capital expenditure "
+            "of Rs 800 crore for the upcoming fiscal FY27."
+        )
+
+        res = extractor.extract_metrics(text=headline, body_text=body)
+
+        assert res.headline == headline
+        assert res.body_text == body
+        assert len(res.metrics) >= 3
+
+        # Headline metric
+        hl_metrics = [m for m in res.metrics if m.text_section == "HEADLINE"]
+        assert len(hl_metrics) >= 1
+        assert hl_metrics[0].normalized_value == 2.5e10
+
+        # Body metrics
+        body_metrics = [m for m in res.metrics if m.text_section == "BODY"]
+        assert len(body_metrics) >= 2
+        # Check capex extraction from body
+        capex = next((m for m in body_metrics if m.normalized_value == 8e9), None)
+        assert capex is not None
+        assert capex.text_section == "BODY"
+        assert capex.reporting_period == "FY27"
+
+        # Check deduplication: Rs 2,500 crore should not be duplicated twice
+        dupes = [m for m in res.metrics if m.normalized_value == 2.5e10]
+        assert len(dupes) == 1
+
+    def test_multi_entity_and_instrument_mapping(self):
+        """A4: Verify preservation of primary, secondary, and all instrument mappings."""
+        pipeline = get_nlp_pipeline()
+        now = datetime.now(timezone.utc)
+
+        # Article mentioning both Reliance Retail and Jio
+        news_evt = NewsEvent(
+            provider_id="bse_filings",
+            source_name="BSE Filings",
+            source_url="https://bseindia.com/filings/123",
+            headline="Reliance Retail and Jio Infocomm announce joint digital commerce initiative",
+            published_at_utc=now,
+            local_received_at_utc=now,
+            local_monotonic_ns=2000000,
+            content_hash="multi_ent_hash",
+        )
+
+        rep = pipeline.process_news_event(news_evt)
+
+        assert rep.primary_entity is not None
+        assert rep.primary_entity.entity_id == "RELIANCE_RETAIL"
+        assert rep.primary_entity.parent_entity_id == "RELIANCE"
+        assert any(e.entity_id == "JIO" for e in rep.all_entities)
+        assert len(rep.all_instrument_mappings) >= 1
+
+    def test_currency_integrity_and_cost_surprise_polarity(self):
+        """A5: Verify currency isolation and economic polarity for expense/debt surprises."""
+        surprise_engine = get_surprise_engine()
+        event_time = datetime(2026, 4, 1, 10, 0, 0, tzinfo=timezone.utc)
+
+        # Cost metric: Operating expenses
+        # Expected: Rs 5,000 crore, Actual: Rs 6,000 crore (+20% higher expenses is BAD!)
+        metric_expense = ExtractedMetricValue(
+            metric_type=FinancialMetricType.EXPENSE,
+            raw_text="Operating expenses rose to Rs 6,000 crore",
+            normalized_value=6e10,
+            currency=CurrencyUnit.INR,
+            original_value=6000.0,
+            original_currency=CurrencyUnit.INR,
+            unit="crore",
+        )
+
+        exp_expense = PointInTimeExpectation(
+            instrument_id="TCS",
+            metric_name="EXPENSE",
+            expected_value=5e10,
+            currency=CurrencyUnit.INR,
+            expectation_type=ExpectationType.CONSENSUS_ANALYST,
+            captured_at=event_time - timedelta(days=1),
+            source="Bloomberg",
+        )
+
+        res_expense = surprise_engine.compute_surprise(
+            metric=metric_expense,
+            event_timestamp=event_time,
+            explicit_expectation=exp_expense,
+            instrument_id="TCS",
+        )
+
+        assert res_expense.is_cost_metric is True
+        assert res_expense.percentage_surprise == 20.0
+        # For cost metric, +20% higher expenses MUST be NEGATIVE_SURPRISE!
+        assert res_expense.surprise_category == SurpriseCategory.NEGATIVE_SURPRISE
+
+        # Revenue metric: +20% higher revenue is POSITIVE_SURPRISE
+        metric_rev = ExtractedMetricValue(
+            metric_type=FinancialMetricType.REVENUE,
+            raw_text="Revenue rose to Rs 6,000 crore",
+            normalized_value=6e10,
+            currency=CurrencyUnit.INR,
+            original_value=6000.0,
+            original_currency=CurrencyUnit.INR,
+            unit="crore",
+        )
+        exp_rev = PointInTimeExpectation(
+            instrument_id="TCS",
+            metric_name="REVENUE",
+            expected_value=5e10,
+            currency=CurrencyUnit.INR,
+            expectation_type=ExpectationType.CONSENSUS_ANALYST,
+            captured_at=event_time - timedelta(days=1),
+            source="Bloomberg",
+        )
+        res_rev = surprise_engine.compute_surprise(
+            metric=metric_rev,
+            event_timestamp=event_time,
+            explicit_expectation=exp_rev,
+            instrument_id="TCS",
+        )
+        assert res_rev.is_cost_metric is False
+        assert res_rev.surprise_category == SurpriseCategory.POSITIVE_SURPRISE
+
+    def test_sqlite_persistence_in_retriever(self, tmp_path):
+        """A6: Verify persistent indexing to SQLite, roundtrip loading, and causal queries."""
+        db_file = tmp_path / "test_retrieval.db"
+        retriever1 = CausalHistoricalEventRetriever(db_path=db_file)
+
+        t1 = datetime(2026, 1, 10, 10, 0, 0, tzinfo=timezone.utc)
+        rec = HistoricalEventRecord(
+            event_id="persist_rec_1",
+            timestamp=t1,
+            headline="Tata Motors launches new commercial EV platform",
+            instrument_id="TATAMOTORS",
+            event_subtype=EventSubtype.PRODUCT_LAUNCH,
+            materiality_score=0.65,
+            post_event_return_1d=0.025,
+            post_event_return_5d=0.040,
+        )
+        retriever1.index_event(rec)
+
+        # Create a fresh retriever instance from the same DB
+        retriever2 = CausalHistoricalEventRetriever(db_path=db_file)
+        assert len(retriever2._events) == 1
+
+        # Query after t1 + 5d
+        ctx = retriever2.retrieve_comparable_events(
+            headline="Tata Motors unveils new electric bus platform",
+            instrument_id="TATAMOTORS",
+            event_subtype=EventSubtype.PRODUCT_LAUNCH,
+            materiality_score=0.62,
+            decision_timestamp=t1 + timedelta(days=6),
+        )
+        assert ctx.total_comparable_count == 1
+        assert ctx.matches[0].event_id == "persist_rec_1"
+        assert ctx.matches[0].post_event_return_1d == 0.025
+        assert ctx.matches[0].post_event_return_5d == 0.040

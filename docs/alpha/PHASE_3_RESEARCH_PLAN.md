@@ -125,7 +125,7 @@ Phase 3 builds the information-extraction engine to test this hypothesis. The sy
   - Forward guidance revision direction.
 
 ### Work Package G: Historical Event Retrieval (`backend/alpha/event_retrieval.py`)
-- Local-first dense/sparse hybrid retrieval (TF-IDF + BM25 / Cosine similarity).
+- Causal lexical and metadata hybrid retrieval (Token Jaccard similarity + subtype + instrument + materiality scoring).
 - **Strict Invariant:** Retrieved events must satisfy $t_{\text{historical}} < \tau_{\text{decision}}$. Future events are purged from candidate pools.
 
 ### Work Package H: Unified Pipeline & Schema (`backend/alpha/nlp_pipeline.py`)
