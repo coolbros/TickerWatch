@@ -11,18 +11,22 @@ All queries enforce causal availability at `decision_timestamp` and outcome matu
 provenance (`outcome_end_ts <= decision_timestamp`).
 """
 
+from __future__ import annotations
+
 from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
 import sqlite3
 import struct
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Union
 from pydantic import BaseModel, Field
 
 from backend.alpha.historical_import import MarketJurisdiction
-from backend.alpha.nlp_pipeline import FinancialEventRepresentation
 from backend.alpha.timestamps import parse_utc_iso, to_utc_iso
+
+if TYPE_CHECKING:
+    from backend.alpha.nlp_pipeline import FinancialEventRepresentation
 
 
 class StoredHistoricalEvent(BaseModel):
