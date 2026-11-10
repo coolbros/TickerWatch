@@ -1,7 +1,7 @@
 # TickerWatch Alpha — System Architecture & Latency Decomposition
 
 > **Document Version:** 1.0.0-alpha  
-> **Status:** ARCHITECTURAL SPECIFICATION — PHASE 0  
+> **Status:** PHASE 2 COMPLETE — ARCHITECTURE SPECIFICATION  
 > **Author:** Distributed Systems & High-Frequency Architecture  
 > **Classification:** Research Pipeline vs. Real-Time Hot Path  
 
@@ -210,3 +210,57 @@ class PredictionDistribution:
     t_pred_utc: str
     monotonic_pred_ns: int
 ```
+
+---
+
+## 7. Phase 2 Implementation Architecture: Data Capture, Storage & Temporal Alignment
+
+Phase 2 constructed the foundational data capture and alignment layer in ackend/alpha/:
+
+`
++====================================================================================================+
+|                                  PHASE 2 DATA SUBSYSTEM ARCHITECTURE                               |
++====================================================================================================+
+
+   [ INCOMING NEWS DISCLOSURE ]                [ MARKET DATA TICKS & QUOTES ]
+   (NSE/BSE Filings, SEC EDGAR)                 (Zerodha Kite Binary, TruData, Replay)
+                |                                                 |
+                v                                                 v
+   [ BaseNewsAdapter / NSEAdapter ]             [ BaseMarketDataProvider / KiteDecoder ]
+   - Canonical Normalization                    - Binary Frame Decoding (LTP / 5-Depth)
+   - Multi-Tier Instrument Mapping              - FeedIntegrityMonitor (Gaps, Dups, Staleness)
+   - Non-Overwriting Revision Tracking          - Bounded Ingress Queue (Backpressure)
+                |                                                 |
+                v                                                 v
+   [ SQLite Relational Tier ]                   [ Partitioned Append-Only Store ]
+   - articles table (Phase 1 compat)            - Partitioned by Date & Instrument
+   - connector_state & schema migrations        - Chunked .jsonl.gz (58x compression)
+   - RawPayloadStore (content-hashed)           - Manifest per partition
+                |                                                 |
+                +-----------------------+-------------------------+
+                                        |
+                                        v
+                       [ TEMPORAL ALIGNMENT ENGINE ]
+                       - As-Of Join: max{t_quote : t_quote <= t_local_received}
+                       - Strict Zero Look-Ahead Invariant Enforcement
+                       - Micro-volatility & Spread & Depth Extraction
+                       - Multi-Horizon Forward Outcome Anchoring (100ms - 5m)
+                                        |
+                                        v
+                       [ RESEARCH DATASET EXPORTER & MANIFEST ]
+                       - Reproducible JSONL / CSV Export
+                       - Cryptographic Dataset SHA-256 Checksum
+`
+
+### Module Directory:
+- ackend/alpha/instruments.py: Instrument Master & Multi-Tier Relevance Taxonomy.
+- ackend/alpha/schemas.py: Versioned Canonical Pydantic Schemas (NewsEvent, MarketEvent, DepthLevel).
+- ackend/alpha/timestamps.py: Multi-Stage Timestamp Attribution & Clock Discipline.
+- ackend/alpha/storage.py: Dual-Tiered Storage Engine (PartitionedMarketDataWriter & RawPayloadStore).
+- ackend/alpha/news_capture.py: News Capture Abstraction, Revision Tracking & Quarantine.
+- ackend/alpha/market_data.py: Provider-Neutral Market Data Scaffolding & Feed Integrity Monitor.
+- ackend/alpha/alignment.py: Temporal Alignment Engine executing Causal As-Of Joins.
+- ackend/alpha/replay.py: Deterministic Historical Replay Engine.
+- ackend/alpha/quality.py: Data Quality Engine & Anomaly Auditor.
+- ackend/alpha/dataset.py: Research Dataset Exporter & Manifest Generator.
+- ackend/alpha/cli.py & scripts/alpha_pipeline.py: User-Facing CLI Tooling.

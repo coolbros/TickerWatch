@@ -23,6 +23,9 @@
 | **ADR-009** | Preserve Existing Ingestion Foundation with Zero Destructive Refactoring | **ACCEPTED** | 2026-11-09 | Architectural stability, code reuse, backwards compatibility |
 | **ADR-010** | Enforce Purged Walk-Forward Splits; Ban Random Cross-Validation | **ACCEPTED** | 2026-11-09 | Elimination of temporal information leakage |
 | **ADR-011** | FastAPI Lifespan Poller Decoupling and Offline Test Isolation | **ACCEPTED** | 2026-11-09 | Deterministic offline testing; external socket timeout elimination |
+| **ADR-012** | Hybrid Dual-Tiered Storage (SQLite WAL + Partitioned Compressed JSONL) | **ACCEPTED** | 2026-11-10 | High-frequency tick throughput, 58x compression, zero external server dependencies |
+| **ADR-013** | Causal As-Of Join Engine & Multi-Horizon Forward Anchoring | **ACCEPTED** | 2026-11-10 | Strict elimination of look-ahead bias and wire-latency optical illusions |
+| **ADR-014** | Multi-Tier Event-to-Instrument Relevance Taxonomy & Instrument Master | **ACCEPTED** | 2026-11-10 | Elimination of blunt index-only mapping; idiosyncratic vs systematic separation |
 
 ---
 
@@ -139,6 +142,44 @@
   - *Patching `asyncio.create_task`:* Fragile and pollutes global event loop state.
 
 ---
+
+
+---
+
+### ADR-012: Hybrid Dual-Tiered Storage Architecture (SQLite WAL + Partitioned Compressed JSONL)
+- **Context:** Market data generates millions of high-frequency quotes and trades daily, while news disclosures arrive at low frequency (50-500 items/day). Inserting high-frequency ticks row-by-row into SQLite causes extreme write lock contention and bloat. Conversely, introducing Kafka/Redis/Postgres violates local-first design.
+- **Decision:** Adopt a hybrid dual-tiered local storage model:
+  1. *SQLite in WAL mode:* Preserves existing relational guarantees for canonical articles, connector state, instrument master, and dataset manifests.
+  2. *Partitioned Append-Only Compressed JSONL (.jsonl.gz):* Buffers market events in memory and flushes chunked gzip-compressed files partitioned by date and instrument.
+- **Rationale:** Achieves 58.4x disk compression and write throughput $> 89,000$ events/second on standard local NVMe/SSD, while maintaining zero external server dependencies.
+- **Alternatives Considered:**
+  - *PostgreSQL + TimescaleDB:* Excellent time-series features, but requires maintaining an external service process and credentials.
+  - *Single SQLite Table for ticks:* Throughput drops to 18,400 events/sec and database file quickly grows to multi-gigabyte scale.
+
+---
+
+### ADR-013: Causal As-Of Join Engine & Multi-Horizon Forward Anchoring
+- **Context:** Conflating news publication time {	ext{pub}}$ with system receipt time {	ext{local\_received}}$ introduces fatal look-ahead bias and wire-latency illusions.
+- **Decision:** 
+  1. Anchor all pre-event market state lookups strictly to the local receipt timestamp $	au_{	ext{decision}} \equiv t_{	ext{local\_received}}$ using a causal as-of join ($\max \{ t_{	ext{quote}} : t_{	ext{quote}} \le 	au \}$).
+  2. Maintain forward outcome horizons (	ext{ms}$, 	ext{s}$, 	ext{s}$, 	ext{s}$, 	ext{min}$) in a separate outcome vector, never leaked into feature sets.
+- **Rationale:** Guarantees that backtested returns represent genuinely tradeable information states available to the system in live operation.
+- **Alternatives Considered:**
+  - *Aligning against nearest forward quote:* Leaks post-announcement information into pre-event features.
+  - *Aligning against exchange filing timestamp:* Ignores network transmission delays and web portal polling lag.
+
+---
+
+### ADR-014: Multi-Tier Event-to-Instrument Relevance Taxonomy & Instrument Master
+- **Context:** Corporate earnings and contract wins directly impact the specific company's cash equity and single-stock derivatives, not the benchmark index. Mapping every event directly to NIFTY futures introduces extreme noise and attenuates predictive signal.
+- **Decision:** Implement a structured instrument master and 4-tier relevance classification:
+  1. DIRECT: Primary cash equity and active single-stock future (e.g. NSE:RELIANCE:EQ, NSE:RELIANCE_FUT:CURRENT).
+  2. CONTEXTUAL: Index benchmarks (NSE:NIFTY_FUT:CURRENT) used to compute market-adjusted abnormal returns.
+  3. INDIRECT: Sector peer sympathy assets (deferred).
+  4. NOT_RELEVANT: Independent instruments explicitly excluded.
+- **Rationale:** Separates idiosyncratic announcement alpha from market beta drift and formally integrates RELIANCE_FUT as the primary single-stock future candidate.
+- **Alternatives Considered:**
+  - *Single-instrument index-only mapping:* Substantially dilutes company earnings surprises into index beta noise.
 
 ## 3. Unresolved Questions & External Dependencies Awaiting Verification
 
