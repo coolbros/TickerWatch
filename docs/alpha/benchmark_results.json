@@ -1,0 +1,24 @@
+{
+  "decode_throughput_eps": 40767.6,
+  "decode_latency_us": {
+    "p50": 24.1,
+    "p95": 27.2,
+    "p99": 33.3
+  },
+  "normalize_throughput_eps": 131237.9,
+  "normalize_latency_us": {
+    "p50": 5.7,
+    "p95": 8.0,
+    "p99": 27.4
+  },
+  "persist_throughput_eps": 89386.8,
+  "alignment_throughput_eps": 1876.7,
+  "alignment_latency_us": {
+    "p50": 499.7,
+    "p95": 691.6,
+    "p99": 1272.1
+  },
+  "replay_throughput_eps": 30192.7,
+  "replay_duration_sec": 0.828,
+  "deterministic_checksum": "8572bd521edb63e531de6c41cc5505b35c2452c890c94f9eee9eb8f427914852"
+}
