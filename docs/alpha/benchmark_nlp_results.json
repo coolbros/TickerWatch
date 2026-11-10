@@ -7,10 +7,10 @@
   "event_classification_accuracy": 0.9423,
   "numerical_extraction_accuracy": 1.0,
   "materiality_tier_accuracy": 0.7692,
-  "latency_p50_us": 287.0,
-  "latency_p95_us": 428.0,
-  "latency_p99_us": 4604.0,
-  "memory_rss_mb": 32.18,
+  "latency_p50_us": 341.0,
+  "latency_p95_us": 754.0,
+  "latency_p99_us": 6474.0,
+  "memory_rss_mb": 32.3,
   "all_gates_passed": true,
-  "evaluation_timestamp": "2026-11-10T03:17:09.901851Z"
+  "evaluation_timestamp": "2026-11-10T03:31:59.002094Z"
 }
