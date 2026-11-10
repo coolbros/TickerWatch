@@ -302,26 +302,34 @@ class EventStudyEngine:
         for spec in rollover_specs or []:
             self._rollover_map[(spec.from_contract_id, spec.to_contract_id)] = spec
 
-    @staticmethod
-    def estimate_bar_resolution_seconds(observations: Sequence[PriceObservation]) -> Optional[float]:
+    def estimate_bar_resolution_seconds(
+        self,
+        observations: Sequence[PriceObservation],
+    ) -> Optional[float]:
         """
-        Estimate intrinsic sampling frequency of observations without letting overnight/weekend gaps
-        artificially inflate intraday bar spacing.
+        Estimate intrinsic trading-session spacing of observations without letting overnight,
+        weekend, or holiday closures inflate resolution (e.g., Fri close -> Mon close is 1 trading day).
         """
         if len(observations) < 2:
             return None
-        deltas = [
-            (observations[i].timestamp_utc - observations[i - 1].timestamp_utc).total_seconds()
-            for i in range(1, len(observations))
-            if (observations[i].timestamp_utc - observations[i - 1].timestamp_utc).total_seconds() > 0
-        ]
-        if not deltas:
+        effective_deltas: List[float] = []
+        for i in range(1, len(observations)):
+            dt_sec = (observations[i].timestamp_utc - observations[i - 1].timestamp_utc).total_seconds()
+            if dt_sec <= 0:
+                continue
+            if dt_sec < 14400.0:
+                effective_deltas.append(dt_sec)
+            else:
+                td_gap = self.calendar.count_trading_days_between(
+                    observations[i - 1].timestamp_utc, observations[i].timestamp_utc
+                )
+                effective_deltas.append(max(1, td_gap) * 86400.0)
+        if not effective_deltas:
             return None
-        # Intraday observations (< 4h apart) represent genuine intraday frequency
-        intraday_deltas = sorted(d for d in deltas if d < 14400.0)
+        intraday_deltas = sorted(d for d in effective_deltas if d < 14400.0)
         if intraday_deltas:
             return intraday_deltas[len(intraday_deltas) // 2]
-        deltas_sorted = sorted(deltas)
+        deltas_sorted = sorted(effective_deltas)
         return deltas_sorted[len(deltas_sorted) // 2]
 
     def _resolve_start_observation(

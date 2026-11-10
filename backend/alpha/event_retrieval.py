@@ -724,7 +724,10 @@ class PersistentVectorRetriever:
         # 4. Fetch Strictly Matured Outcomes for candidates
         matured_outcomes_map = self.store.get_matured_outcomes(cand_ids, decision_timestamp=decision_timestamp)
 
-        q_inst_set = {i.upper() for i in (query_instrument_ids or [])}
+        benchmark_ids = {"NSE:NIFTY_FUT:CURRENT", "NSE:BANKNIFTY_FUT:CURRENT", "US:SPY:EQ", "US:QQQ:EQ"}
+        is_macro_q = (query_family or "").upper() in ("MACRO", "MACROECONOMIC")
+        raw_q_insts = {i.upper() for i in (query_instrument_ids or [])}
+        q_inst_set = raw_q_insts if is_macro_q else {i for i in raw_q_insts if i not in benchmark_ids}
         q_ent_set = {e.upper() for e in (query_entity_ids or [])}
 
         scored_matches: List[RetrievedHistoricalMatch] = []
@@ -735,17 +738,24 @@ class PersistentVectorRetriever:
             bm25_s = bm25_scores[idx]
             sem_s = float(sem_scores[idx])
 
-            # Subtype / family match
+            # Subtype / family match (discount fallback ROUTINE_ADMINISTRATIVE collisions)
             if query_subtype and c.event_subtype == query_subtype:
-                subtype_match = 1.0
-            elif query_family and c.event_family == query_family:
+                subtype_match = 0.2 if query_subtype == "ROUTINE_ADMINISTRATIVE" else 1.0
+            elif query_family and c.event_family == query_family and query_family != "GENERAL_CORPORATE":
                 subtype_match = 0.5
             else:
                 subtype_match = 0.0
 
-            # Multi-entity & Instrument overlap
-            c_inst_set = {i.upper() for i in c.instrument_ids}
-            shared_insts = sorted(q_inst_set & c_inst_set)
+            # Multi-entity & Direct Instrument overlap (ignore contextual benchmark co-occurrence on corporate events)
+            c_direct_set = {
+                m.get("instrument_id", "").upper()
+                for m in c.instrument_mappings
+                if m.get("relevance") == "DIRECT" and m.get("instrument_id")
+            }
+            if not c_direct_set:
+                c_raw = {i.upper() for i in c.instrument_ids}
+                c_direct_set = c_raw if is_macro_q else {i for i in c_raw if i not in benchmark_ids}
+            shared_insts = sorted(q_inst_set & c_direct_set)
             c_ent_ids = {e.get("entity_id", "").upper() for e in c.resolved_entities if e.get("entity_id")}
             if c.primary_entity_id:
                 c_ent_ids.add(c.primary_entity_id.upper())
@@ -786,15 +796,15 @@ class PersistentVectorRetriever:
                 combined = sem_s
             else:
                 combined = (
-                    0.28 * sem_s
-                    + 0.12 * bm25_s
-                    + 0.05 * jaccard
-                    + 0.18 * subtype_match
-                    + 0.14 * inst_match
-                    + 0.08 * num_sim
-                    + 0.05 * surprise_align
-                    + 0.06 * mat_prox
-                    + 0.04 * temp_prox
+                    0.46 * sem_s
+                    + 0.14 * bm25_s
+                    + 0.04 * jaccard
+                    + 0.12 * subtype_match
+                    + 0.12 * inst_match
+                    + 0.04 * num_sim
+                    + 0.03 * surprise_align
+                    + 0.03 * mat_prox
+                    + 0.02 * temp_prox
                 )
             combined = min(1.0, max(0.0, combined))
             if combined < min_similarity:
