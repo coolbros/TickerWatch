@@ -55,7 +55,9 @@ Four distinct retrieval modes (`RetrievalMode`) are implemented cleanly for abla
 3. **`DENSE_SEMANTIC`:** Exact cosine similarity over versioned dense vector embeddings.
 4. **`HYBRID_MODULAR`:** Transparent linear-modular score across nine financial dimensions:
 
-$$\text{Combined}(e_q, e_h) = 0.28\,S_{\text{sem}} + 0.12\,S_{\text{bm25}} + 0.05\,S_{\text{jacc}} + 0.18\,S_{\text{sub}} + 0.14\,S_{\text{inst}} + 0.08\,S_{\text{num}} + 0.05\,S_{\text{surp}} + 0.06\,S_{\text{mat}} + 0.04\,S_{\text{time}}$$
+$$\text{Combined}(e_q, e_h) = 0.46\,S_{\text{sem}} + 0.14\,S_{\text{bm25}} + 0.04\,S_{\text{jacc}} + 0.12\,S_{\text{sub}} + 0.12\,S_{\text{inst}} + 0.04\,S_{\text{num}} + 0.03\,S_{\text{surp}} + 0.03\,S_{\text{mat}} + 0.02\,S_{\text{time}}$$
+
+*(Note: For corporate events, $S_{\text{inst}}$ excludes contextual benchmark overlaps such as `NSE:NIFTY_FUT:CURRENT` so unrelated issuers do not spuriously collide, and `ROUTINE_ADMINISTRATIVE` fallback collisions are discounted to $0.20$ in $S_{\text{sub}}$.)*
 
 ### Component Definitions:
 - **$S_{\text{sem}}$ (Semantic Cosine):** Scaled unit-vector dot product over canonical text `[Event Subtype] [Entity] Headline + Snippet`.

@@ -1,7 +1,7 @@
 # TickerWatch Alpha — Architectural & Research Decisions Record (ADR)
 
 > **Document Version:** 1.0.0-alpha  
-> **Status:** APPROVED BASELINE — PHASE 0  
+> **Status:** LIVING RECORD — UPDATED THROUGH PHASE 4  
 > **Author:** Quantitative Governance, Infrastructure & ML Architecture  
 > **Repository:** `TickerWatch` (`coolbros/TickerWatch`)  
 > **Branch:** `alpha-research`  
@@ -29,6 +29,10 @@
 | **ADR-015** | Financial Entity Recognition, Disambiguation & Ticker Collision Protection | **ACCEPTED** | 2026-11-10 | Context-gated dictionary matching; elimination of stopword collisions ("IT", "AT") |
 | **ADR-016** | Hierarchical Financial Event Taxonomy & Sub-Millisecond Rule-Head Architecture | **ACCEPTED** | 2026-11-10 | 5-family/25-subtype taxonomy, multi-label boundaries, modular FinBERT compatibility |
 | **ADR-017** | Point-in-Time Numerical Surprise Formulation & Expectation Integrity | **ACCEPTED** | 2026-11-10 | Causal consensus integrity, zero look-ahead bias, explicit UNAVAILABLE_EXPECTATION |
+| **ADR-018** | Jurisdiction-Partitioned SQLite WAL Historical Store & Feature/Label Separation | **ACCEPTED** | 2026-11-10 | Cross-market isolation (`IN`/`US`), idempotent revision provenance, zero outcome leakage |
+| **ADR-019** | Quantized ONNX `bge-small-en-v1.5` & Exact Cosine Over Premature HNSW | **ACCEPTED** | 2026-11-10 | Paraphrase recall (100% R@5), CPU < 11ms latency, 0 approximation error below 50K events |
+| **ADR-020** | Dual-Clock Causal Outcome Maturity & Session/Rollover-Aware Event Study | **ACCEPTED** | 2026-11-10 | Strict `outcome_end_ts <= tau_decision`, calendar accuracy, explicit rollover integrity |
+| **ADR-021** | Sample-Size-Gated Contextual Distributions & Decoupled Market Regime (`M_t`) | **ACCEPTED** | 2026-11-10 | `INSUFFICIENT_EVIDENCE` guard (`n < 5`), bootstrap uncertainty, clean Phase 5 ablation |
 
 ---
 
@@ -219,6 +223,45 @@
   2. Enforce strict point-in-time expectation integrity: only expectations with timestamp $\tau_{\text{captured\_at}} < \tau_{\text{decision}}$ may be used; post-event expectations throw `ValueError`.
   3. If no pre-event consensus was recorded at the decision timestamp, explicitly return `UNAVAILABLE_EXPECTATION`. Never fabricate estimates, silently impute values, or omit the field.
 - **Rationale:** Preserves mathematical and empirical validity across both profits and losses, and guarantees reproducible historical research free from look-ahead bias.
+
+---
+
+### ADR-018: Jurisdiction-Partitioned SQLite WAL Historical Store & Feature/Label Separation
+- **Context:** Phase 3's historical retriever held events in an volatile in-memory Python list, lacked schema-level separation between event metadata and post-event returns, and allowed inadvertent cross-market comparisons.
+- **Decision:**
+  1. Persist historical events in a 5-table SQLite WAL store (`historical_events`, `historical_event_instruments`, `historical_event_revisions`, `historical_event_embeddings`, `historical_event_outcomes`).
+  2. Enforce explicit `MarketJurisdiction` partitions (`IN` vs `US` vs `GLOBAL`) and `is_synthetic` boolean segregation (`is_synthetic=0` default).
+  3. Require two independent causal timestamps on every indexed record: `event_timestamp_utc` and `system_available_at_utc` (`local_received_at_utc`), filtering retrieval candidates strictly on `system_available_at_utc < tau_decision`.
+- **Rationale:** Zero external server dependencies (rejecting Redis/Kafka/Milvus prematurely), atomic idempotent deduplication, crash recovery, and structural isolation preventing query future labels from entering feature tables.
+
+---
+
+### ADR-019: Quantized ONNX `bge-small-en-v1.5` & Exact Cosine Over Premature HNSW
+- **Context:** Initial Phase 0–3 plans suggested HNSW approximate nearest-neighbor indexing, while Phase 3 shipped a lexical Jaccard matcher that failed on financial paraphrases (e.g., *"trims guidance"* vs *"slashes top-line projection"*).
+- **Decision:**
+  1. Adopt MIT-licensed `BAAI/bge-small-en-v1.5` (33M params, 384-D, INT8 ONNX via `onnxruntime`, 34.01 MB) paired with Causal BM25 and structured metadata in a transparent 9-dimensional hybrid scorer (`HYBRID_MODULAR`), plus a zero-weight `fin-concept-proj-256d-v1` (256-D) air-gapped fallback.
+  2. Version every vector with explicit `model_version` so incompatible spaces can never be silently mixed.
+  3. **Supersedes Phase 4 Gate HNSW assumption below 50,000 events:** Use exact vectorized NumPy cosine similarity (`batch_cosine_similarity`) with SQLite pre-filtering instead of HNSW until corpus scale exceeds ~50,000 events or brute-force vector search exceeds 5ms p95.
+- **Rationale:** Exact search on <50K 384-D `float32` vectors takes <1ms in BLAS/NumPy with zero recall approximation error and trivial SQLite time/instrument pre-filtering. Empirically, `bge-small-en-v1.5-onnx-int8` lifted benchmark nDCG@5 from `0.8700` (Jaccard) / `0.8496` (BM25) to `0.9854` (dense) and `0.9621` (hybrid) with `10.9ms` end-to-end CPU p95.
+
+---
+
+### ADR-020: Dual-Clock Causal Outcome Maturity & Session/Rollover-Aware Event Study
+- **Context:** Filtering historical candidates solely by `t_historical < tau_decision` leaks 1-day and 5-day post-event market returns from events that occurred hours earlier, and daily EOD bars cannot validly manufacture synthetic 1m/5m outcomes.
+- **Decision:**
+  1. Separate event eligibility (`system_available_at_utc < tau_decision`) from outcome eligibility (`outcome_end_ts <= tau_decision`) using a double-lock SQLite + Python maturity guard.
+  2. Enforce intrinsic bar-resolution gating (`estimate_bar_resolution_seconds` accounting for trading-day spacing across weekends), exchange calendars (`Asia/Kolkata` IST and `America/New_York` ET with DST/holidays), halt/stale exclusions, and mandatory `FuturesRolloverSpec` validation (`ROLLOVER_INVALID` if unstitched across expiries).
+  3. Restrict corporate event studies primarily to directly affected cash equities / SSFs, isolating benchmark index futures (`NSE:NIFTY_FUT:CURRENT`) as contextual adjustment factors.
+- **Rationale:** Eliminates label leakage from unelapsed horizons, prevents fabricated intraday outcomes from EOD bars, and protects hybrid retrieval from spurious index-overlap collisions across unrelated companies.
+
+---
+
+### ADR-021: Sample-Size-Gated Contextual Distributions & Decoupled Market Regime (`M_t`)
+- **Context:** Sparse historical strata can produce narrow misleading averages (`n = 2` returns averaged into a confident figure), and mixing microstructure state into NLP vectors prevents Phase 5 ablation testing ($E_t$ vs $H_t$ vs $M_t$).
+- **Decision:**
+  1. Require `min_sample_size = 5` matured outcome observations before issuing statistical response summaries; smaller samples must explicitly report `EvidenceStatus.INSUFFICIENT_EVIDENCE` alongside seeded percentile bootstrap 95% confidence intervals when populated.
+  2. Build `MarketRegimeContext` ($M_t$) strictly from Phase 2 `MarketEvent` primitives at or before `decision_timestamp` and keep it structurally distinct inside `HistoricalIntelligenceRepresentation` (`contains_query_future_labels = False`).
+- **Rationale:** Prevents statistical overconfidence on undersized corpora and enables rigorous orthogonal Hypothesis Testing in Phase 5.
 
 ---
 

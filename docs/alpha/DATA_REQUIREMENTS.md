@@ -146,3 +146,18 @@ Exported datasets conform to `schema_version = "2.0.0"` with accompanying crypto
   - Routine administrative notices (board meeting intimations, trading window closures, share certificate loss).
   - US SEC EDGAR filings (Apple, Amazon, Microsoft).
   - Adversarial collision cases and parenthesized accounting losses.
+
+---
+
+## 7. Phase 4 Historical Corpus, Embedding & Event-Study Requirements
+
+### 7.1 Strictly Partitioned Historical Event Corpora
+- **Geographic Non-Substitution:** Indian (`IN`: NSE/BSE/RBI/MOSPI) and US (`US`: SEC 8-K/10-Q/10-K/Enforcement) disclosures MUST remain stored and queried under explicit `MarketJurisdiction` partitions. Cross-market substitution (e.g., applying US tech 8-K post-event variance to Indian capital goods contracts) is prohibited.
+- **Availability vs. Event Time:** Historical records MUST retain both publisher event timestamps (`event_timestamp_utc`) and system availability timestamps (`system_available_at_utc >= event_timestamp_utc`); causal candidate retrieval filters strictly on `system_available_at_utc < tau_decision`.
+- **Versioning & Synthetic Isolation:** Every imported or benchmark dataset requires SHA-256 deduplication and explicit `is_synthetic` boolean flagging (`is_synthetic=0` mandatory in default production/research queries).
+
+### 7.2 Historical Market Data for Multi-Horizon Event Studies
+- **Intraday Outcomes (`1m`, `5m`, `30m`, `1h`):** Require verified intraday bar or quote/trade series whose median active-session spacing satisfies the horizon resolution limit (e.g., $\le 60\text{s}$ for `1m`). Daily EOD bars are strictly blocked from generating synthetic intraday outcomes (`INSUFFICIENT_RESOLUTION`).
+- **Daily/Swing Outcomes (`1d`, `5d`):** Evaluated strictly on exchange trading calendars (`Asia/Kolkata` 09:15–15:30 IST; `America/New_York` 09:30–16:00 ET with DST and exchange holiday exclusions), with explicit `overnight_gap_included` and `session_boundary_crossed` metadata.
+- **Derivatives & Rollover Provenance:** Futures observations require explicit `contract_id` tags and documented `FuturesRolloverSpec` adjustments across contract expiry transitions; unadjusted stitching across contract expiries yields `ROLLOVER_INVALID`.
+- **Hard Feature/Label Separation:** Future outcome records live exclusively in `historical_event_outcomes` (`outcome_end_ts`) and are surfaced for historical peers only after `outcome_end_ts <= tau_decision`.
