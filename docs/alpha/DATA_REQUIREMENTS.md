@@ -1,7 +1,7 @@
 # TickerWatch Alpha — Data Requirements, Source Feasibility & Alignment Architecture
 
 > **Document Version:** 1.0.0-alpha  
-> **Status:** PHASE 2 COMPLETE — VERIFIED SPECIFICATION  
+> **Status:** PHASE 3 COMPLETE — FINANCIAL NLP & EXPECTATION DATA REQUIREMENTS INTEGRATED  
 > **Author:** Data Engineering & Quantitative Market Microstructure  
 > **Mandate:** Rigorous Licensing, Push-Based Ingestion & Temporal Synchronization  
 
@@ -121,3 +121,28 @@ For the initial proof-of-concept in Phase 1–3:
 Exported datasets conform to `schema_version = "2.0.0"` with accompanying cryptographic manifests (`ResearchDatasetManifest`):
 - Format: JSONL and CSV.
 - Traceability: Every row links `news_event_id`, `headline`, `content_hash`, `decision_timestamp_utc`, `instrument_id`, `relevance`, pre-event quotes/volatility, and multi-horizon forward returns (100ms, 1s, 5s, 30s, 5m).
+
+---
+
+## 6. Phase 3 Financial NLP & Expectation Data Requirements
+
+### 6.1 Point-in-Time Consensus Expectation Data
+- **Core Prerequisite:** Essential for calculating genuine financial surprise ($S = A - E, S_{\%}$).
+- **Required Metadata:** Metric name, consensus mean/median estimate, dispersion standard deviation ($\sigma$), estimate capture timestamp, and provider ID.
+- **Strict Causal Integrity:** Expectation timestamp must strictly precede the event publication timestamp ($\tau_{\text{captured}} < \tau_{\text{decision}}$).
+- **Candidate Data Sources for Indian Markets:** FactSet, Bloomberg Estimates, Refinitiv I/B/E/S, or certified domestic institutional consensus aggregators.
+- **Handling Protocol When Absent:** Return explicit `UNAVAILABLE_EXPECTATION`. Fabricating consensus estimates or silently imputing numbers is strictly prohibited.
+
+### 6.2 Financial Entity Knowledge Base Specifications
+- **Master Registry:** Canonical tickers, exchange symbols (NSE, BSE, NASDAQ, NYSE), full corporate names, and aliases.
+- **Corporate Hierarchy:** Parent-subsidiary mapping linking unlisted operating arms (e.g. Jio Platforms, Reliance Retail) to listed equity parents (`RELIANCE`).
+- **Leadership Co-occurrence:** Key executive rosters (e.g. Mukesh Ambani, Tim Cook, Salil Parekh).
+- **Collision Protection:** Vocabulary stopword list to prevent false-positive ticker matching on common English prepositions and nouns ("IT", "AT", "NOW", "CAN").
+
+### 6.3 Gold Standard Evaluation Benchmark Corpus
+- Hand-curated, multi-source evaluation corpus of at least 50 cases covering:
+  - Indian corporate disclosures (quarterly earnings, dividend declarations, capex commitments, order wins).
+  - Macroeconomic releases (RBI MPC repo rates, CPI/WPI inflation, SEBI regulatory actions).
+  - Routine administrative notices (board meeting intimations, trading window closures, share certificate loss).
+  - US SEC EDGAR filings (Apple, Amazon, Microsoft).
+  - Adversarial collision cases and parenthesized accounting losses.
