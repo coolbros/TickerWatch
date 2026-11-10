@@ -160,7 +160,7 @@ class FinancialEventClassifier:
                     r"\b(posts\s+(?:\([^\)]+\)\s+)?profit|reports\s+(?:\([^\)]+\)\s+)?profit|posts\s+(?:\([^\)]+\)\s+)?loss|reports\s+(?:\([^\)]+\)\s+)?loss)\b",
                     r"\b(quarterly\s+revenue\s+of|operating\s+profit\s+rises)\b",
                 ],
-                "keywords": ["earnings", "financial results", "quarterly profit", "pat", "ebitda", "net profit", "net income"],
+                "keywords": ["earnings", "financial results", "quarterly results", "quarterly profit", "pat", "ebitda", "net profit", "net income", "results"],
                 "base_confidence": 0.95,
             },
             # Guidance
@@ -309,6 +309,15 @@ class FinancialEventClassifier:
                 evidence_keywords=["board meeting intimation"],
                 classifier_type="DETERMINISTIC_RULE_HEAD",
             )
+
+        # Precedence Rule: Earnings vs Dividend Co-occurrence
+        # If an announcement reports both quarterly results and dividend declaration,
+        # EARNINGS_ANNOUNCEMENT is primary and DIVIDEND_ANNOUNCEMENT is secondary.
+        subtypes_present = {st for st, _, _ in scored_subtypes}
+        if EventSubtype.EARNINGS_ANNOUNCEMENT in subtypes_present and EventSubtype.DIVIDEND_ANNOUNCEMENT in subtypes_present:
+            # Reorder so EARNINGS_ANNOUNCEMENT is first
+            earn_tuple = next(t for t in scored_subtypes if t[0] == EventSubtype.EARNINGS_ANNOUNCEMENT)
+            scored_subtypes = [earn_tuple] + [t for t in scored_subtypes if t[0] != EventSubtype.EARNINGS_ANNOUNCEMENT]
 
         top_subtype, top_conf, top_evidence = scored_subtypes[0]
         top_family = SUBTYPE_TO_FAMILY.get(top_subtype, EventPrimaryFamily.GENERAL_CORPORATE)
