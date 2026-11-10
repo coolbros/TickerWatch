@@ -190,7 +190,7 @@ class FinancialEventClassifier:
             # Order / Contract Win
             EventSubtype.CONTRACT_ORDER_WIN: {
                 "patterns": [
-                    r"\b(bags\s+order|wins\s+contract|secures\s+deal|secures\s+order|awarded\s+contract|awards\s+contract|order\s+win|order\s+worth)\b",
+                    r"\b(bags|wins|secures|awarded|receives)\s+(?:[\w\s.&,-]{0,45}?\b)(order|contract|deal|project|mandate)\b",
                     r"\b(signs\s+pact|commercial\s+agreement\s+worth)\b",
                 ],
                 "keywords": ["bags order", "wins contract", "secures deal", "order win", "awarded contract", "secures order"],

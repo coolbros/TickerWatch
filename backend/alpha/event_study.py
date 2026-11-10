@@ -239,7 +239,7 @@ def select_study_instruments(
         (primary_instrument_id, contextual_instrument_ids, default_benchmark_id)
     """
     default_bench = "NSE:NIFTY_FUT:CURRENT" if jurisdiction == MarketJurisdiction.IN else "US:SPY:EQ"
-    is_macro = rep.classification.primary_family.value == "MACRO" or (
+    is_macro = rep.classification.primary_family.value in ("MACRO", "MACROECONOMIC") or (
         rep.primary_entity.entity_id in ("RBI", "FINMIN", "INDIA_MACRO", "GOI", "FED", "SEC")
     )
 

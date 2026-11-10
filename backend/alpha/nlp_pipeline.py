@@ -288,6 +288,21 @@ class FinancialNLPPipeline:
             execution_latency_us=elapsed_us,
         )
 
+    def build_historical_intelligence(
+        self,
+        representation: FinancialEventRepresentation,
+        store: Any,
+        **kwargs: Any,
+    ) -> Any:
+        """
+        Optional non-breaking Phase 4 bridge: enrich a structured FinancialEventRepresentation
+        with persistent causal vector retrieval, contextual outcome distributions, and regime state.
+        """
+        from backend.alpha.historical_intelligence import HistoricalIntelligencePipeline
+
+        hp = HistoricalIntelligencePipeline(store=store, nlp_pipeline=self)
+        return hp.process_event_representation(representation, **kwargs)
+
 
 _nlp_pipeline: Optional[FinancialNLPPipeline] = None
 
