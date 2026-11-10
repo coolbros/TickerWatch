@@ -198,7 +198,7 @@ class FinancialEntityResolver:
                 aliases=["ICICI Bank", "ICICI"],
                 industry_sector="Banking & Financial Services",
                 market_cap_tier="LARGE",
-                executives=["Sandeep Bakhshi"],
+                executives=["Sandeep Bakhshi"], direct_instruments=["NSE:ICICIBANK:EQ"],
             ),
             EntityDefinition(
                 entity_id="SBIN",
@@ -228,7 +228,7 @@ class FinancialEntityResolver:
                 aliases=["Bharti Airtel", "Airtel"],
                 industry_sector="Telecommunications",
                 market_cap_tier="LARGE",
-                executives=["Sunil Bharti Mittal", "Gopal Vittal"],
+                executives=["Sunil Bharti Mittal", "Gopal Vittal"], direct_instruments=["NSE:BHARTIARTL:EQ"],
             ),
             EntityDefinition(
                 entity_id="ITC",
@@ -238,7 +238,7 @@ class FinancialEntityResolver:
                 aliases=["ITC", "ITC Ltd"],
                 industry_sector="FMCG & Conglomerate",
                 market_cap_tier="LARGE",
-                executives=["Sanjiv Puri"],
+                executives=["Sanjiv Puri"], direct_instruments=["NSE:ITC:EQ"],
             ),
             EntityDefinition(
                 entity_id="KOTAKBANK",
@@ -248,7 +248,7 @@ class FinancialEntityResolver:
                 aliases=["Kotak Mahindra Bank", "Kotak Bank", "Kotak"],
                 industry_sector="Banking & Financial Services",
                 market_cap_tier="LARGE",
-                executives=["Uday Kotak", "Ashok Vaswani"],
+                executives=["Uday Kotak", "Ashok Vaswani"], direct_instruments=["NSE:KOTAKBANK:EQ"],
             ),
 
             # 5. Regulators & Macroeconomic Bodies
@@ -288,7 +288,7 @@ class FinancialEntityResolver:
                 exchange_tickers={"NASDAQ": "AAPL"},
                 aliases=["Apple", "Apple Inc"],
                 industry_sector="Technology",
-                executives=["Tim Cook"],
+                executives=["Tim Cook"], direct_instruments=["US:AAPL:EQ"],
             ),
             EntityDefinition(
                 entity_id="AMZN",
@@ -297,7 +297,7 @@ class FinancialEntityResolver:
                 exchange_tickers={"NASDAQ": "AMZN"},
                 aliases=["Amazon", "Amazon.com", "AWS"],
                 industry_sector="Consumer Discretionary & Cloud",
-                executives=["Andy Jassy", "Jeff Bezos"],
+                executives=["Andy Jassy", "Jeff Bezos"], direct_instruments=["US:AMZN:EQ"],
             ),
             EntityDefinition(
                 entity_id="MSFT",
@@ -306,7 +306,7 @@ class FinancialEntityResolver:
                 exchange_tickers={"NASDAQ": "MSFT"},
                 aliases=["Microsoft", "Microsoft Corp"],
                 industry_sector="Technology & Software",
-                executives=["Satya Nadella"],
+                executives=["Satya Nadella"], direct_instruments=["US:MSFT:EQ"],
             ),
         ]
 
@@ -447,7 +447,25 @@ class FinancialEntityResolver:
             entity_id=target_entity_id,
             event_family=event_family,
         )
-        return resolved_mappings
+        seen_keys: Set[Tuple[str, str]] = set()
+        if ent_def.entity_type not in (EntityType.REGULATOR, EntityType.MACRO_ENTITY):
+            for inst_id in ent_def.direct_instruments:
+                rec = InstrumentMappingRecord(
+                    instrument_id=inst_id,
+                    relevance=RelevanceTier.DIRECT,
+                    weight=1.0,
+                    notes=f"Direct instrument ({target_entity_id})",
+                )
+                key = (rec.instrument_id, rec.relevance.value)
+                if key not in seen_keys:
+                    mappings.append(rec)
+                    seen_keys.add(key)
+        for rm in resolved_mappings:
+            key = (rm.instrument_id, rm.relevance.value)
+            if key not in seen_keys:
+                mappings.append(rm)
+                seen_keys.add(key)
+        return mappings
 
 
 _entity_resolver: Optional[FinancialEntityResolver] = None

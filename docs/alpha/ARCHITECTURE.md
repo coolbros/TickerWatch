@@ -1,7 +1,7 @@
 # TickerWatch Alpha — System Architecture & Latency Decomposition
 
 > **Document Version:** 1.0.0-alpha  
-> **Status:** PHASE 3 COMPLETE — FINANCIAL NLP & EVENT LAYER INTEGRATED  
+> **Status:** PHASE 4 COMPLETE — HISTORICAL VECTOR RETRIEVAL & CONTEXTUAL INTELLIGENCE INTEGRATED  
 > **Author:** Distributed Systems & High-Frequency Architecture  
 > **Classification:** Research Pipeline vs. Real-Time Hot Path  
 
@@ -264,3 +264,64 @@ Phase 2 constructed the foundational data capture and alignment layer in ackend
 - ackend/alpha/quality.py: Data Quality Engine & Anomaly Auditor.
 - ackend/alpha/dataset.py: Research Dataset Exporter & Manifest Generator.
 - ackend/alpha/cli.py & scripts/alpha_pipeline.py: User-Facing CLI Tooling.
+
+---
+
+## 8. Phase 4 Implementation Architecture: Historical Event Vector Retrieval & Contextual Intelligence
+
+Phase 4 elevates the Phase 2 alignment layer and Phase 3 Financial NLP layer into a **persistent, causally-safe historical event retrieval, event-study, and contextual intelligence system** implemented across `backend/alpha/`:
+
+```
++====================================================================================================+
+|                      PHASE 4 HISTORICAL VECTOR RETRIEVAL & CONTEXTUAL PIPELINE                     |
++====================================================================================================+
+
+   [ FINANCIAL EVENT REPRESENTATION (E_t) ]               [ AS-OF MARKET EVENTS (M_t) ]
+   (Decision ts = local_received_at_utc, Full-Doc         (Strictly <= tau_decision, excluded future
+    Extraction, Multi-Entity, Currency-Isolated)           count tracked, Phase 2 Alignment)
+                 |                                                      |
+                 v                                                      v
+   [ DENSE SEMANTIC & LEXICAL ENCODERS ]                   [ MARKET REGIME CONTEXT BUILDER ]
+   - Primary: BGE-Small-en-v1.5 INT8 ONNX (384-D)         - Spread (bps), L1/L2 Depth Imbalance
+   - Air-Gap Fallback: FinConceptProj (256-D)              - Microprice Offset, 1m/5m/30m Returns
+   - Causal Okapi BM25 + Token Jaccard                     - Volatility & Liquidity Regimes (Decoupled)
+                 |                                                      |
+                 v                                                      |
+   [ PERSISTENT HISTORICAL STORE (SQLite WAL v4.0) ]                    |
+   - Separated tables: events / instruments / revisions                 |
+     / versioned float32 BLOB embeddings / outcomes                     |
+   - Jurisdiction Partitioning (IN vs US) & is_synthetic flag           |
+   - Hard Causal Pre-Filter: system_available_at_utc < tau_decision     |
+   - Double-Lock Maturity Filter: outcome_end_ts <= tau_decision        |
+                 |                                                      |
+                 v                                                      |
+   [ MODULAR HYBRID RANKER & EVENT-STUDY ENGINE ]                       |
+   - 9-component interpretable score (0.46 sem + 0.14 bm25 + ...)       |
+   - Context-benchmark collision & routine-admin downweighting          |
+   - Calendar-aware event study (NSE IST / US ET, halts, rollovers)     |
+                 |                                                      |
+                 v                                                      |
+   [ CONTEXTUAL INTELLIGENCE SYNTHESIZER ]                              |
+   - Horizons: 1m, 5m, 30m, 1h, 1d, 5d (Resolution-Gated)               |
+   - Bootstrap 95% CIs, Quantiles, Small-Sample Gate (n < 5)            |
+   - Conditional Slices (Instrument / Sector / Materiality / Surprise)  |
+                 |                                                      |
+                 +--------------------------+---------------------------+
+                                            |
+                                            v
+                   [ HISTORICAL INTELLIGENCE REPRESENTATION v4.0.0-alpha ]
+                   - contains_query_future_labels = False (Hard Separation)
+                   - Ready for Phase 5 Causal Model Conditioning P(dF | E_t, H_t, M_t)
+```
+
+### Phase 4 Module Directory:
+- `backend/alpha/historical_import.py`: Provider-neutral causal importers (`NSE`, `BSE`, `RBI`, `SEC`, `JSONL`) enforcing strict `IN`/`US` jurisdiction isolation.
+- `backend/alpha/historical_store.py`: Persistent SQLite WAL store (`schema_version = "4.0.0"`) separating event metadata, instrument mappings, revision lineage, versioned embeddings, and outcome labels.
+- `backend/alpha/event_embeddings.py`: Versioned dense encoder (`bge-small-en-v1.5-onnx-int8` 384-D primary + `fin-concept-proj-256d-v1` 256-D offline fallback) and exact vectorized cosine similarity.
+- `backend/alpha/event_retrieval.py`: Upgraded `CausalBM25Scorer`, `PersistentVectorRetriever`, and 9-dimensional `RetrievalScoreBreakdown` across `JACCARD`, `BM25`, `DENSE_SEMANTIC`, and `HYBRID_MODULAR` modes.
+- `backend/alpha/outcomes.py`: Point-in-time outcome schemas, horizon maturity checks, quality statuses (`MATURED`, `IMMATURE`, `INSUFFICIENT_RESOLUTION`, `ROLLOVER_INVALID`), and rollover specs.
+- `backend/alpha/event_study.py`: Exchange-calendar-aware (`Asia/Kolkata` / `America/New_York`) multi-horizon event-study engine with benchmark adjustment, MFE/MAE, halt/gap guards, and futures rollover validation.
+- `backend/alpha/contextual_features.py`: Sample-aware response aggregator (`min_sample_size = 5` gating `INSUFFICIENT_EVIDENCE`), percentile bootstrap CIs, and conditional slices.
+- `backend/alpha/market_context.py`: Decoupled as-of microstructure and market regime builder ($M_t$) strictly bounded at `<= decision_timestamp`.
+- `backend/alpha/historical_intelligence.py`: Unified Phase 4 pipeline and `HistoricalIntelligenceRepresentation` (`4.0.0-alpha`) integrated non-destructively into `FinancialNLPPipeline`.
+- `backend/alpha/historical_evaluation.py` & `scripts/alpha_historical_benchmark.py`: Chronological zero-leakage IR evaluator (`Precision@k`, `Recall@k`, `MRR`, `nDCG@k`) and 6-check event-study invariant verifier.
