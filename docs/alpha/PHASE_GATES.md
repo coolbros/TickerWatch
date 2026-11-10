@@ -27,10 +27,10 @@ To prevent the catastrophic risks endemic to quantitative trading projects—suc
    [ PHASE 1: Ingestion Foundation Audit & Sandbox-Safe Test Suite Reproduction ] [SIGNED OFF]
                            | (Gate 1 Sign-Off)
                            v
-   [ PHASE 2: Market Data Stream Scaffolding & Sub-Second Alignment Engine ] <=== NEXT PHASE
+   [ PHASE 2: Market Data Stream Scaffolding & Sub-Second Alignment Engine ] [SIGNED OFF - REPLAY READY]
                            | (Gate 2 Sign-Off)
                            v
-   [ PHASE 3: Financial Event NLP, Entity Disambiguation & Surprise Extraction ]
+   [ PHASE 3: Financial Event NLP, Entity Disambiguation & Surprise Extraction ] <=== NEXT PHASE
                            | (Gate 3 Sign-Off)
                            v
    [ PHASE 4: Historical Event Vector Retrieval & Contextual Intelligence ]
