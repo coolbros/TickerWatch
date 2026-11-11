@@ -374,3 +374,56 @@ Phase 5 implements the end-to-end research pipeline testing $P(\Delta F_{t+h} \m
 - `backend/alpha/walk_forward.py` & `backend/alpha/leakage_audit.py`: Purged chronological walk-forward splitter with horizon-scaled embargoing and adversarial `LeakageAuditor`.
 - `backend/alpha/predictive_evaluation.py` & `backend/alpha/research_backtest.py`: Pure-NumPy OOS metrics, Holm-Bonferroni + Newey-West DM + moving-block bootstrap `AlphaAttributor`, and strict `EXECUTABLE`-only `ResearchBacktester`.
 - `backend/alpha/model_registry.py` & `backend/alpha/predictive_pipeline.py`: SHA-256 verified artifact registry and end-to-end experiment runner (`scripts/alpha_phase5_experiment.py`).
+
+---
+
+## 10. Phase 6 Implementation Architecture: Live Acquisition, Shadow Operation & Signal Validation
+
+Phase 6 transitions TickerWatch Alpha from an offline research pipeline into an audited, paper-only live operational and dataset-building platform:
+
+```
++====================================================================================================+
+|                    PHASE 6 LIVE SHADOW ACQUISITION, EXECUTION & VALIDATION SYSTEM                  |
++====================================================================================================+
+
+   [ AUTHORIZED LIVE NEWS FEEDS ]                       [ MARKET DATA & DISABLED SCAFFOLDS ]
+   - RBIPressReleaseAdapter (HTTP 200, IST->UTC)        - ZerodhaKiteLiveAdapter (Kite Binary Decoder,
+   - SECEdgarLiveNewsAdapter & SECPressReleaseRSS         fail-closed when keys unset; Resilient Runner)
+   - Disabled NSE / BSE / Company IR scaffolds          - Disabled TrueData scaffold (no mock-as-live)
+                  |                                                      |
+                  +--------------------------+---------------------------+
+                                             |
+                                             v
+   [ LIVE CAPTURE STORE (SQLite WAL + Partitioned .jsonl.gz + RawPayloadStore) ]
+   - Immutable `live_news_revisions` (SQLite triggers), market snapshots, connection/gap incidents
+   - `LiveInstrumentUniverse` (dynamic non-expired contracts, cash/SSF/IDX/benchmark separation)
+                                             |
+                                             v
+   [ LIVE EVENT-TO-MARKET PIPELINE (live_research_pipeline.py) ]
+   - E_t (Phase 3) -> H_t / M_t <= decision_ts (Phase 4) -> 87 Features (Phase 5)
+   - `ModelEligibilityAuditor`: MODEL_ELIGIBLE vs MODEL_UNVALIDATED vs SYNTHETIC_DIAGNOSTIC_ONLY
+   - Uncertainty calibration / strict NO_TRADE fail-closed gating + p50/p95/p99 latency tracking
+                                             |
+                                             v
+   [ IMMUTABLE SHADOW SIGNAL LEDGER (`shadow_ledger.py`) + OUTCOME TRACKER ]
+   - Append-only `shadow_predictions` (SHA-256 + UPDATE/DELETE triggers) & `shadow_outcomes`
+                                             |
+         +-----------------------------------+-----------------------------------+
+         |                                   |                                   |
+         v                                   v                                   v
+   [ SHADOW EXECUTION SIMULATOR ]    [ SHADOW MONITORING & CLI ]        [ REPLAY PARITY VERIFIER ]
+   - L2 sweep / L1 BBO / OHLCV       - 5 Health Planes + PSI Drift      - Persisted Disk Replay
+   - Non-optimistic Limit Queue      - scripts/alpha_shadow_report.py   - 0.0-Diff Determinism
+   - Gross / Exec / Net Separation   - 20/30-Session Validation Gate    - Gap / Restart Audit
+```
+
+### Phase 6 Module Directory:
+- `backend/alpha/live_news_adapters.py`: `RBIPressReleaseAdapter` (`Asia/Kolkata` localization + ETag), `SECEdgarLiveNewsAdapter`, `SECPressReleaseRSSAdapter`, hardened `NSECorporateLiveAdapter` (disabled unless reachable), `DisabledNewsSourceAdapter`.
+- `backend/alpha/live_market_adapters.py`: `ZerodhaKiteLiveAdapter`, `DisabledMarketDataProvider`, `ProviderAuthError` secret redaction, `ResilientMarketFeedRunner` (reconnects, heartbeats, gap-resync callbacks, bounded queue overflow telemetry, checkpoints).
+- `backend/alpha/live_instruments.py`: `LiveInstrumentUniverse` resolving non-expired futures contracts, rollover states, lot/tick specs, and separated event mappings.
+- `backend/alpha/live_data_capture.py`: `LiveCaptureStore` (SQLite WAL + `.jsonl.gz` chunks + immutable revisions + `reconstruct_state_as_of`).
+- `backend/alpha/live_research_pipeline.py`: End-to-end causal live runner tracking monotonic latencies and enforcing fail-closed abstention.
+- `backend/alpha/shadow_ledger.py`: SQLite trigger-enforced immutable `ShadowSignalLedger` with canonical SHA-256 digests.
+- `backend/alpha/shadow_execution.py`: Paper-only L2/L1/OHLCV simulator with anti-optimistic limit queue rules and separated `gross`/`executable`/`net` outputs.
+- `backend/alpha/shadow_monitoring.py` & `scripts/alpha_shadow_report.py`: Five-plane observability, PSI/calibration drift, and CLI reporting.
+- `backend/alpha/shadow_validation.py` & `backend/alpha/live_replay_parity.py`: 6-gate `ModelEligibilityAuditor`, 20/30-session `ShadowValidationEvaluator`, and `LiveReplayParityVerifier`.
