@@ -414,7 +414,7 @@ class CausalHistoricalEventRetriever:
                 event_subtype=subtype_val,
                 primary_entity=instrument_id,
             )
-            q_vec = encoder.encode_single(q_text)
+            q_vec = encoder.encode_query_single(q_text)
             c_mat = self._get_candidate_vectors(causal_candidates, encoder)
             # Cosine sim in [-1, 1] -> rescale to [0, 1] for compatibility
             raw_cos = batch_cosine_similarity(q_vec, c_mat)
@@ -585,7 +585,7 @@ class PersistentVectorRetriever:
                 encoder = self.embedding_engine.fallback_encoder
 
         target_ver = encoder.model_version
-        existing = self.store.get_embedding(event.event_id, target_ver)
+        existing = self.store.get_embedding(event.event_id, target_ver, revision_number=event.revision_number)
         if existing is not None:
             return existing
 
@@ -595,8 +595,8 @@ class PersistentVectorRetriever:
             event_subtype=event.event_subtype,
             primary_entity=event.primary_entity_id,
         )
-        vec = encoder.encode_single(text)
-        self.store.save_embedding(event.event_id, target_ver, vec)
+        vec = encoder.encode_documents([text])[0].tolist()
+        self.store.save_embedding(event.event_id, target_ver, vec, revision_number=event.revision_number)
         return vec
 
     @staticmethod
@@ -641,6 +641,7 @@ class PersistentVectorRetriever:
         mode: RetrievalMode = RetrievalMode.HYBRID_MODULAR,
         include_synthetic: bool = False,
         market_regime_volatility: Optional[str] = None,
+        outcome_label_type: Optional[str] = "REACTION",
     ) -> EventRetrievalContext:
         """
         Execute multi-stage causal retrieval over persisted historical events.
@@ -678,7 +679,8 @@ class PersistentVectorRetriever:
 
         # 2. Fetch or lazily compute embeddings for candidates strictly scoped by model_version
         cand_ids = [c.event_id for c in candidates]
-        cached_embs = self.store.get_embeddings_batch(cand_ids, model_version=active_ver)
+        rev_map = {c.event_id: c.revision_number for c in candidates}
+        cached_embs = self.store.get_embeddings_batch(cand_ids, model_version=active_ver, revision_map=rev_map)
 
         missing_cands: List[StoredHistoricalEvent] = []
         missing_texts: List[str] = []
@@ -695,11 +697,11 @@ class PersistentVectorRetriever:
                 )
 
         if missing_texts:
-            new_mat = encoder.encode_batch(missing_texts)
+            new_mat = encoder.encode_documents(missing_texts)
             for idx, c in enumerate(missing_cands):
                 vec = new_mat[idx].tolist()
                 cached_embs[c.event_id] = vec
-                self.store.save_embedding(c.event_id, active_ver, vec)
+                self.store.save_embedding(c.event_id, active_ver, vec, revision_number=c.revision_number)
 
         # Build matrix [N, D] aligned with candidates
         emb_matrix = np.array([cached_embs[c.event_id] for c in candidates], dtype=np.float32)
@@ -711,7 +713,7 @@ class PersistentVectorRetriever:
             event_subtype=query_subtype,
             primary_entity=(query_entity_ids[0] if query_entity_ids else None),
         )
-        q_vec = encoder.encode_single(q_text)
+        q_vec = encoder.encode_query_single(q_text)
         raw_cos = batch_cosine_similarity(q_vec, emb_matrix)
         sem_scores = np.clip((raw_cos + 1.0) / 2.0, 0.0, 1.0) if mode == RetrievalMode.HYBRID_MODULAR else np.clip(raw_cos, 0.0, 1.0)
 
@@ -722,7 +724,7 @@ class PersistentVectorRetriever:
         bm25_scores = self._bm25.score_candidates(q_tokens, cand_token_lists)
 
         # 4. Fetch Strictly Matured Outcomes for candidates
-        matured_outcomes_map = self.store.get_matured_outcomes(cand_ids, decision_timestamp=decision_timestamp)
+        matured_outcomes_map = self.store.get_matured_outcomes(cand_ids, decision_timestamp=decision_timestamp, label_type=outcome_label_type)
 
         benchmark_ids = {"NSE:NIFTY_FUT:CURRENT", "NSE:BANKNIFTY_FUT:CURRENT", "US:SPY:EQ", "US:QQQ:EQ"}
         is_macro_q = (query_family or "").upper() in ("MACRO", "MACROECONOMIC")

@@ -36,7 +36,7 @@ To prevent the catastrophic risks endemic to quantitative trading projects—suc
    [ PHASE 4: Historical Event Vector Retrieval & Contextual Intelligence ] [SIGNED OFF - GATE 4 PASSED]
                            | (Gate 4 Sign-Off)
                            v
-   [ PHASE 5: Predictive Multi-Horizon Model Training & Probability Calibration ] <=== NEXT PHASE
+   [ PHASE 5: Predictive Multi-Horizon Model Training & Probability Calibration ] [SOFTWARE COMPLETE / EMPIRICAL DATA BLOCKED]
                            | (Gate 5 Sign-Off)
                            v
    [ PHASE 6: Realistic Execution Simulation, Indian Cost Modeling & Latency Stress ]
@@ -138,11 +138,11 @@ To prevent the catastrophic risks endemic to quantitative trading projects—suc
 - **Gate 4 Verification:**
   - [x] Zero look-ahead leakage verified: double-lock enforcement (`system_available_at_utc < decision_timestamp` and `outcome_end_ts <= decision_timestamp`) with explicit immature/resolution masking.
   - [x] Exact vector search scan $< 1\text{ms}$ on CPU; full end-to-end Top-5 CPU retrieval (incl. query ONNX INT8 encode + SQLite filtering) at **6.60–10.92 ms p95**, lifting nDCG@5 from `0.8700` (Jaccard) / `0.8496` (BM25) to **0.9854 (ONNX Dense)** and **0.9621 (ONNX Hybrid)** with **1.0000 MRR**.
-  - [x] Decoupled `HistoricalIntelligenceRepresentation` (`v4.0.0-alpha`) and `MarketRegimeContext` ready for Model C vs Model B empirical $H2$ predictive loss testing upon Phase 5 ingestion of authorized Indian historical filings and intraday tick archives.
+  - [x] Integrated via Pull Request #2 normal merge commit (`66b9328`) and hardened in Phase 5 WP-A (`PHASE_5_PHASE_4_REMEDIATION.md`: IST/ET timezone localization, bitemporal revision reconstruction, BGE-small CLS-512 parity v2, REACTION vs EXECUTABLE separation, and pre-event rolling beta).
 
 ---
 
-### Phase 5: Predictive Multi-Horizon Model Training & Probability Calibration
+### Phase 5: Predictive Multi-Horizon Model Training, Walk-Forward Validation & Alpha Attribution (SOFTWARE VERIFIED / EMPIRICAL DATA BLOCKED)
 - **Objective:** Train the full multi-modal fusion model (Model D) predicting forward price distributions over horizons $h \in \{1\text{s}, 5\text{s}, 30\text{s}, 5\text{min}\}$.
 - **Mandatory Tasks:**
   - Implement cross-attention or feature fusion combining text embeddings, historical context, and order-book microstructure.
@@ -151,7 +151,9 @@ To prevent the catastrophic risks endemic to quantitative trading projects—suc
 - **Gate 5 Verification:**
   - Expected Calibration Error (ECE) $< 0.05$.
   - Out-of-sample directional accuracy $> 56.0\%$ across active signals.
-  - Falsification test: If directional accuracy $\le 52.0\%$ or Information Coefficient $\le 0.02$, halt model development.
+  - [ ] Falsification test: If directional accuracy $\le 52.0\%$ or Information Coefficient $\le 0.02$ on real OOS markets, halt model promotion.
+  - [x] **Software Infrastructure Verified:** Phase 4 causal hardening (WP-A), 87-feature causal registry (WP-C), dual Reaction/Executable target builder (WP-D), dependency-free baseline/linear/tree/quantile estimators (WP-E), validation-only calibration & 7-rule NO_TRADE abstention (WP-F), purged walk-forward + `LeakageAuditor` (WP-G), Holm-Bonferroni HAC attribution + EXECUTABLE-only backtester (WP-H), SHA-256 `LocalModelRegistry` (WP-I), synthetic + zero-signal null experiments & 19-gate test suite (WP-J).
+  - [ ] **Empirical Real-Data Promotion BLOCKED:** `RealDataReadinessAuditor` confirmed `IN=BLOCKED` (`0` Indian company filings), `US=INSUFFICIENT_DATA` (`0` real market bars, `0` real matured outcomes, `0%` consensus, 1.5s backfill-compressed timestamps). **Cannot advance to Phase 6 empirical simulation or live capital** until real multi-year event & market archives satisfy `PHASE_5_DATA_REQUIREMENTS.md`.
 
 ---
 

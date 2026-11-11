@@ -83,6 +83,7 @@ class HistoricalIntelligenceRepresentation(BaseModel):
     """
 
     schema_version: str = "4.0.0-alpha"
+    historical_context_source: str = "PHASE_4_PERSISTENT_MATURITY_VERIFIED"
     query_event_id: str
     decision_timestamp: datetime
     jurisdiction: MarketJurisdiction
@@ -116,7 +117,39 @@ class HistoricalIntelligenceRepresentation(BaseModel):
 
     def to_feature_dict(self) -> Dict[str, Any]:
         """Export strictly causal feature payload safe for Phase 5 model inputs."""
+    def to_feature_dict(self) -> Dict[str, Any]:
+        """Export strictly causal feature payload safe for Phase 5 model inputs."""
         return self.model_dump(mode="json")
+
+
+def assert_valid_phase4_training_input(obj: Any) -> HistoricalIntelligenceRepresentation:
+    """
+    Causal Isolation Guard (Work Package A6):
+    Ensures Phase 5 feature construction consumes persistent, outcome-maturity-verified
+    Phase 4 HistoricalIntelligenceRepresentation and refuses legacy Phase 3 in-memory
+    EventRetrievalContext or representations carrying future target labels.
+    """
+    if not isinstance(obj, HistoricalIntelligenceRepresentation):
+        raise TypeError(
+            "Phase 5 modeling strictly requires Phase 4 HistoricalIntelligenceRepresentation "
+            f"(got {type(obj).__name__}); legacy Phase 3 EventRetrievalContext is prohibited."
+        )
+    if obj.contains_query_future_labels:
+        raise ValueError("Feature/label boundary violated: contains_query_future_labels=True.")
+    if obj.query_event_id in obj.retrieved_event_ids:
+        raise ValueError(f"Self-leakage violated: query_event_id '{obj.query_event_id}' present in retrieved matches.")
+    for m in obj.retrieved_matches:
+        avail = m.system_available_at_utc or m.timestamp
+        if avail >= obj.decision_timestamp:
+            raise ValueError(
+                f"Look-ahead violation in match {m.event_id}: available {avail.isoformat()} >= decision {obj.decision_timestamp.isoformat()}"
+            )
+        for h_key, out_rec in m.matured_outcomes.items():
+            if out_rec.outcome_end_ts > obj.decision_timestamp:
+                raise ValueError(
+                    f"Outcome maturity violation on {m.event_id} horizon={h_key}: end {out_rec.outcome_end_ts.isoformat()} > decision {obj.decision_timestamp.isoformat()}"
+                )
+    return obj
 
 
 def infer_event_jurisdiction(rep: FinancialEventRepresentation) -> MarketJurisdiction:
@@ -141,8 +174,9 @@ class HistoricalIntelligencePipeline:
     distribution synthesis, and point-in-time market regime context.
     """
 
-    PIPELINE_VERSION = "4.0.0-alpha"
-    RETRIEVAL_MODEL_VERSION = "CAUSAL_HYBRID_MODULAR_v4.0"
+    SCHEMA_VERSION = "4.0.0-alpha"
+    PIPELINE_VERSION = "4.1.0-alpha"
+    RETRIEVAL_MODEL_VERSION = "CAUSAL_HYBRID_MODULAR_v4.1"
 
     def __init__(
         self,
@@ -343,7 +377,7 @@ class HistoricalIntelligencePipeline:
         elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 3)
 
         return HistoricalIntelligenceRepresentation(
-            schema_version=self.PIPELINE_VERSION,
+            schema_version=self.SCHEMA_VERSION,
             query_event_id=rep.event_id,
             decision_timestamp=decision_ts,
             jurisdiction=active_jurisdiction,

@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-11-10T11:46:31.410362Z",
+  "generated_at_utc": "2026-11-11T05:14:52.727140Z",
   "python_version": "3.12.10",
   "platform_info": "Windows 11 (AMD64)",
   "onnx_bge_small_available": true,
@@ -11,18 +11,18 @@
   },
   "split_leakage_duplicates": 0,
   "indexing_throughput_events_per_sec": {
-    "IN (bge-small-en-v1.5-onnx-int8)": 65.54,
-    "US (bge-small-en-v1.5-onnx-int8)": 76.71
+    "IN (bge-small-en-v1.5-onnx-int8-cls512-v2)": 57.61,
+    "US (bge-small-en-v1.5-onnx-int8-cls512-v2)": 58.63
   },
   "embedding_latency_mean_ms": {
-    "FinConceptProj-256D": 0.781,
-    "BGE-Small-ONNX-INT8": 3.282
+    "FinConceptProj-256D": 0.909,
+    "BGE-Small-ONNX-INT8": 3.225
   },
-  "ram_rss_mb_before": 42.85,
-  "ram_rss_mb_after": 137.29,
+  "ram_rss_mb_before": 42.08,
+  "ram_rss_mb_after": 134.4,
   "sqlite_storage_bytes": {
-    "IN_store": 225280,
-    "US_store": 151552
+    "IN_store": 376832,
+    "US_store": 237568
   },
   "in_market_comparison": [
     {
@@ -36,9 +36,9 @@
       "mrr": 0.95,
       "ndcg_at_k": 0.8601,
       "retrieval_coverage": 1.0,
-      "query_latency_p50_ms": 6.726,
-      "query_latency_p95_ms": 8.186,
-      "query_latency_p99_ms": 8.186,
+      "query_latency_p50_ms": 8.544,
+      "query_latency_p95_ms": 10.407,
+      "query_latency_p99_ms": 10.407,
       "by_stratum_mrr": {
         "CONTRACT_WIN": 1.0,
         "EARNINGS": 1.0,
@@ -58,9 +58,9 @@
       "mrr": 0.95,
       "ndcg_at_k": 0.8444,
       "retrieval_coverage": 1.0,
-      "query_latency_p50_ms": 6.595,
-      "query_latency_p95_ms": 7.108,
-      "query_latency_p99_ms": 7.108,
+      "query_latency_p50_ms": 8.642,
+      "query_latency_p95_ms": 10.143,
+      "query_latency_p99_ms": 10.143,
       "by_stratum_mrr": {
         "CONTRACT_WIN": 1.0,
         "EARNINGS": 1.0,
@@ -80,9 +80,9 @@
       "mrr": 0.9,
       "ndcg_at_k": 0.7539,
       "retrieval_coverage": 1.0,
-      "query_latency_p50_ms": 6.711,
-      "query_latency_p95_ms": 7.406,
-      "query_latency_p99_ms": 7.406,
+      "query_latency_p50_ms": 8.877,
+      "query_latency_p95_ms": 9.251,
+      "query_latency_p99_ms": 9.251,
       "by_stratum_mrr": {
         "CONTRACT_WIN": 1.0,
         "EARNINGS": 1.0,
@@ -102,9 +102,9 @@
       "mrr": 1.0,
       "ndcg_at_k": 0.9436,
       "retrieval_coverage": 1.0,
-      "query_latency_p50_ms": 6.671,
-      "query_latency_p95_ms": 7.891,
-      "query_latency_p99_ms": 7.891,
+      "query_latency_p50_ms": 9.08,
+      "query_latency_p95_ms": 9.553,
+      "query_latency_p99_ms": 9.553,
       "by_stratum_mrr": {
         "CONTRACT_WIN": 1.0,
         "EARNINGS": 1.0,
@@ -116,17 +116,17 @@
     {
       "mode_label": "3B_DENSE_ONNX_BGE_SMALL",
       "retrieval_mode": "DENSE_SEMANTIC",
-      "embedding_model_version": "bge-small-en-v1.5-onnx-int8",
+      "embedding_model_version": "bge-small-en-v1.5-onnx-int8-cls512-v2",
       "num_queries": 10,
       "top_k": 5,
       "precision_at_k": 0.38,
       "recall_at_k": 1.0,
       "mrr": 1.0,
-      "ndcg_at_k": 0.9892,
+      "ndcg_at_k": 0.9856,
       "retrieval_coverage": 1.0,
-      "query_latency_p50_ms": 10.453,
-      "query_latency_p95_ms": 10.917,
-      "query_latency_p99_ms": 10.917,
+      "query_latency_p50_ms": 13.054,
+      "query_latency_p95_ms": 14.517,
+      "query_latency_p99_ms": 14.517,
       "by_stratum_mrr": {
         "CONTRACT_WIN": 1.0,
         "EARNINGS": 1.0,
@@ -138,17 +138,17 @@
     {
       "mode_label": "4B_HYBRID_ONNX_BGE_SMALL",
       "retrieval_mode": "HYBRID_MODULAR",
-      "embedding_model_version": "bge-small-en-v1.5-onnx-int8",
+      "embedding_model_version": "bge-small-en-v1.5-onnx-int8-cls512-v2",
       "num_queries": 10,
       "top_k": 5,
       "precision_at_k": 0.36,
       "recall_at_k": 0.9667,
       "mrr": 1.0,
-      "ndcg_at_k": 0.9678,
+      "ndcg_at_k": 0.9642,
       "retrieval_coverage": 1.0,
-      "query_latency_p50_ms": 10.225,
-      "query_latency_p95_ms": 10.557,
-      "query_latency_p99_ms": 10.557,
+      "query_latency_p50_ms": 12.636,
+      "query_latency_p95_ms": 13.447,
+      "query_latency_p99_ms": 13.447,
       "by_stratum_mrr": {
         "CONTRACT_WIN": 1.0,
         "EARNINGS": 1.0,
@@ -170,9 +170,9 @@
       "mrr": 1.0,
       "ndcg_at_k": 0.8898,
       "retrieval_coverage": 1.0,
-      "query_latency_p50_ms": 6.378,
-      "query_latency_p95_ms": 6.571,
-      "query_latency_p99_ms": 6.571,
+      "query_latency_p50_ms": 8.25,
+      "query_latency_p95_ms": 8.579,
+      "query_latency_p99_ms": 8.579,
       "by_stratum_mrr": {
         "CONTRACT_WIN": 1.0,
         "EARNINGS": 1.0,
@@ -192,9 +192,9 @@
       "mrr": 0.9,
       "ndcg_at_k": 0.8601,
       "retrieval_coverage": 1.0,
-      "query_latency_p50_ms": 6.303,
-      "query_latency_p95_ms": 6.887,
-      "query_latency_p99_ms": 6.887,
+      "query_latency_p50_ms": 8.349,
+      "query_latency_p95_ms": 8.63,
+      "query_latency_p99_ms": 8.63,
       "by_stratum_mrr": {
         "CONTRACT_WIN": 0.5,
         "EARNINGS": 1.0,
@@ -214,9 +214,9 @@
       "mrr": 0.9,
       "ndcg_at_k": 0.8836,
       "retrieval_coverage": 1.0,
-      "query_latency_p50_ms": 6.36,
-      "query_latency_p95_ms": 7.013,
-      "query_latency_p99_ms": 7.013,
+      "query_latency_p50_ms": 8.264,
+      "query_latency_p95_ms": 8.318,
+      "query_latency_p99_ms": 8.318,
       "by_stratum_mrr": {
         "CONTRACT_WIN": 1.0,
         "EARNINGS": 0.5,
@@ -236,9 +236,9 @@
       "mrr": 1.0,
       "ndcg_at_k": 0.958,
       "retrieval_coverage": 1.0,
-      "query_latency_p50_ms": 6.54,
-      "query_latency_p95_ms": 6.845,
-      "query_latency_p99_ms": 6.845,
+      "query_latency_p50_ms": 8.42,
+      "query_latency_p95_ms": 8.564,
+      "query_latency_p99_ms": 8.564,
       "by_stratum_mrr": {
         "CONTRACT_WIN": 1.0,
         "EARNINGS": 1.0,
@@ -250,7 +250,7 @@
     {
       "mode_label": "3B_DENSE_ONNX_BGE_SMALL",
       "retrieval_mode": "DENSE_SEMANTIC",
-      "embedding_model_version": "bge-small-en-v1.5-onnx-int8",
+      "embedding_model_version": "bge-small-en-v1.5-onnx-int8-cls512-v2",
       "num_queries": 5,
       "top_k": 5,
       "precision_at_k": 0.32,
@@ -258,9 +258,9 @@
       "mrr": 1.0,
       "ndcg_at_k": 0.9779,
       "retrieval_coverage": 1.0,
-      "query_latency_p50_ms": 9.414,
-      "query_latency_p95_ms": 9.434,
-      "query_latency_p99_ms": 9.434,
+      "query_latency_p50_ms": 12.904,
+      "query_latency_p95_ms": 14.387,
+      "query_latency_p99_ms": 14.387,
       "by_stratum_mrr": {
         "CONTRACT_WIN": 1.0,
         "EARNINGS": 1.0,
@@ -272,7 +272,7 @@
     {
       "mode_label": "4B_HYBRID_ONNX_BGE_SMALL",
       "retrieval_mode": "HYBRID_MODULAR",
-      "embedding_model_version": "bge-small-en-v1.5-onnx-int8",
+      "embedding_model_version": "bge-small-en-v1.5-onnx-int8-cls512-v2",
       "num_queries": 5,
       "top_k": 5,
       "precision_at_k": 0.28,
@@ -280,9 +280,9 @@
       "mrr": 1.0,
       "ndcg_at_k": 0.9508,
       "retrieval_coverage": 1.0,
-      "query_latency_p50_ms": 9.014,
-      "query_latency_p95_ms": 9.221,
-      "query_latency_p99_ms": 9.221,
+      "query_latency_p50_ms": 11.595,
+      "query_latency_p95_ms": 11.815,
+      "query_latency_p99_ms": 11.815,
       "by_stratum_mrr": {
         "CONTRACT_WIN": 1.0,
         "EARNINGS": 1.0,
@@ -298,42 +298,42 @@
       "recall@5": 0.8222,
       "mrr": 0.9667,
       "ndcg@5": 0.87,
-      "p95_latency_ms": 8.186
+      "p95_latency_ms": 10.407
     },
     "2_CAUSAL_BM25": {
       "precision@5": 0.2933,
       "recall@5": 0.8555,
       "mrr": 0.9333,
       "ndcg@5": 0.8496,
-      "p95_latency_ms": 7.108
+      "p95_latency_ms": 10.143
     },
     "3A_DENSE_CONCEPT_PROJ": {
       "precision@5": 0.2533,
       "recall@5": 0.7555,
       "mrr": 0.9,
       "ndcg@5": 0.7971,
-      "p95_latency_ms": 7.406
+      "p95_latency_ms": 9.251
     },
     "4A_HYBRID_CONCEPT_PROJ": {
       "precision@5": 0.3067,
       "recall@5": 0.8889,
       "mrr": 1.0,
       "ndcg@5": 0.9484,
-      "p95_latency_ms": 7.891
+      "p95_latency_ms": 9.553
     },
     "3B_DENSE_ONNX_BGE_SMALL": {
       "precision@5": 0.36,
       "recall@5": 1.0,
       "mrr": 1.0,
-      "ndcg@5": 0.9854,
-      "p95_latency_ms": 10.917
+      "ndcg@5": 0.983,
+      "p95_latency_ms": 14.517
     },
     "4B_HYBRID_ONNX_BGE_SMALL": {
       "precision@5": 0.3333,
       "recall@5": 0.9445,
       "mrr": 1.0,
-      "ndcg@5": 0.9621,
-      "p95_latency_ms": 10.557
+      "ndcg@5": 0.9597,
+      "p95_latency_ms": 13.447
     }
   },
   "event_study_checks": {

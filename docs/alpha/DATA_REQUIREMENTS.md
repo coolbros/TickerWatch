@@ -161,3 +161,13 @@ Exported datasets conform to `schema_version = "2.0.0"` with accompanying crypto
 - **Daily/Swing Outcomes (`1d`, `5d`):** Evaluated strictly on exchange trading calendars (`Asia/Kolkata` 09:15–15:30 IST; `America/New_York` 09:30–16:00 ET with DST and exchange holiday exclusions), with explicit `overnight_gap_included` and `session_boundary_crossed` metadata.
 - **Derivatives & Rollover Provenance:** Futures observations require explicit `contract_id` tags and documented `FuturesRolloverSpec` adjustments across contract expiry transitions; unadjusted stitching across contract expiries yields `ROLLOVER_INVALID`.
 - **Hard Feature/Label Separation:** Future outcome records live exclusively in `historical_event_outcomes` (`outcome_end_ts`) and are surfaced for historical peers only after `outcome_end_ts <= tau_decision`.
+
+---
+
+## 8. Phase 5 Empirical Data Readiness Gate & Known Gaps
+
+Before any empirical claim about $P(\Delta F_{t+h} \mid E_t, H_t, M_t)$ can be accepted, `RealDataReadinessAuditor` (`backend/alpha/data_readiness.py`) requires minimum non-synthetic market and disclosure volume. As audited on `2026-11-11`:
+
+- **India (`IN`): `BLOCKED`** — Only 4 general Moneycontrol wrap-ups ingested, 0 NSE/BSE corporate disclosures, 0.00-year span (target $\ge 5,000$ events, $\ge 2.0$ years), and 0 real market bars/quotes.
+- **US (`US`): `INSUFFICIENT_DATA`** — 3,038 SEC filings exist (primarily AAPL/AMZN/MSFT Form 4/header metadata; 3,041/3,042 classify `ROUTINE_ADMINISTRATIVE`), all `observed_at_utc` compressed into a 1.5s batch backfill window (`2026-11-08T09:34Z`), 0 real market ticks, 0% consensus expectations.
+- **Overall Empirical Modeling Status:** **`BLOCKED`** (`docs/alpha/PHASE_5_DATA_READINESS.md` & `docs/alpha/PHASE_5_DATA_REQUIREMENTS.md`). Phase 5 empirical alpha validation awaits external historical market bars (1m OHLCV / L1 quotes + corporate action & rollover ledgers) and multi-year primary exchange announcements.

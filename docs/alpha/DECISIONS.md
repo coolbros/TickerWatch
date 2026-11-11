@@ -33,6 +33,10 @@
 | **ADR-019** | Quantized ONNX `bge-small-en-v1.5` & Exact Cosine Over Premature HNSW | **ACCEPTED** | 2026-11-10 | Paraphrase recall (100% R@5), CPU < 11ms latency, 0 approximation error below 50K events |
 | **ADR-020** | Dual-Clock Causal Outcome Maturity & Session/Rollover-Aware Event Study | **ACCEPTED** | 2026-11-10 | Strict `outcome_end_ts <= tau_decision`, calendar accuracy, explicit rollover integrity |
 | **ADR-021** | Sample-Size-Gated Contextual Distributions & Decoupled Market Regime (`M_t`) | **ACCEPTED** | 2026-11-10 | `INSUFFICIENT_EVIDENCE` guard (`n < 5`), bootstrap uncertainty, clean Phase 5 ablation |
+| **ADR-022** | Fold-Safe 87-Feature `E/H/M` Schema & Vectorized Classical Baselines Before Deep Nets | **ACCEPTED** | 2026-11-11 | Exact ablation isolation (`A`..`E`), zero scaler leakage, small-sample discipline |
+| **ADR-023** | Separate `REACTION` vs `EXECUTABLE` Targets & Explicit `NEUTRAL_NO_TRADE` Cost Hurdles | **ACCEPTED** | 2026-11-11 | Prevents backtest fill illusion and forced trading of sub-cost moves |
+| **ADR-024** | Validation-Only Calibration (Platt/Isotonic/Conformal) & 7-Rule `NO_TRADE` Abstention | **ACCEPTED** | 2026-11-11 | Calibrated uncertainty boundaries; blocks low-confidence or illiquid signals |
+| **ADR-025** | Purged Walk-Forward, Holm-Bonferroni HAC Attribution & Honest `BLOCKED` Empirical Gate | **ACCEPTED** | 2026-11-11 | Zero overlap/revision leakage, FWER control, hard ban on synthetic claims as live alpha |
 
 ---
 
@@ -272,3 +276,25 @@ The following items are explicitly tracked for resolution in subsequent phases:
 2. **Exchange Filing PDF Parsing Latency (Phase 3):** Determine whether BSE/NSE corporate announcement PDFs can be parsed, extracted, and normalized in $< 10\text{ms}$ using lightweight C-based PDF parsers (e.g. `mupdf` / `pypdfium2`).
 3. **Consensus Data Availability (Phase 3):** Identify an affordable, structured source for consensus quarterly earnings estimates on Indian equities (e.g., FactSet, Bloomberg, or crowd-sourced consensus aggregators).
 4. **Physical Delivery Rollover Execution (Phase 6):** If single-stock futures (`RELIANCE_FUT`) are traded, establish precise automated square-off triggers to ensure 100% exit prior to SEBI physical delivery margin imposition.
+
+---
+
+### ADR-022: Fold-Safe 87-Feature `E/H/M` Schema & Vectorized Classical Baselines Before Deep Nets
+- **Context:** Mixing Phase 3/4 NLP, historical retrieval, and market-regime representations into opaque matrices prevents ablation attribution ($E_t$ vs $H_t$ vs $M_t$), risks scaler look-ahead, and causes severe small-sample overfitting in neural architectures.
+- **Decision:** Lock canonical 87-feature contract (`5.0.0-alpha`: `E=38`, `H=26`, `M=23`) with explicit missingness indicators, train-fold-only `FoldSafeFeatureTransformer` (`clip_z=8.0`), and vectorized pure-NumPy linear/tree/quantile estimators (`RIDGE`, `ELASTIC_NET`, `LOGISTIC_DIRECTION`, `RANDOM_FOREST`, `GBDT`, `QUANTILE_LINEAR`), gating neural `COMPACT_MLP` at `N >= 100`.
+- **Rationale:** Enables controlled statistical attribution across feature subsets (`MODEL_A`..`MODEL_E`) without external ML bloat or training-fold leakage.
+
+### ADR-023: Separate `REACTION` vs `EXECUTABLE` Targets & Explicit `NEUTRAL_NO_TRADE` Cost Hurdles
+- **Context:** Standard event-study `REACTION` returns anchored before receipt reflect jump moves unattainable under realistic decision/fill latency, while binary up/down targets force models to trade economically trivial fluctuations.
+- **Decision:** Separate `OutcomeLabelType.REACTION` from `OutcomeLabelType.EXECUTABLE` (latencies + spread crossing + active-session fills), forbid `REACTION` labels inside `ResearchBacktester`, and encode `ActionableDirectionClass.NEUTRAL_NO_TRADE` around round-trip friction cost hurdles (`9.1 bps` NIFTY Fut / `12.5 bps` NSE Equity conservative).
+- **Rationale:** Prevents gross-profit illusions and restricts directional targets to economically meaningful post-cost moves.
+
+### ADR-024: Validation-Only Calibration (Platt/Isotonic/Conformal) & 7-Rule `NO_TRADE` Abstention
+- **Context:** Raw regression/tree scores lack calibrated probabilities and symmetric predictive intervals, tempting strategies to fire signals despite ambiguous entities, sparse historical analogues, stale quotes, high uncertainty, or sub-cost expected edge.
+- **Decision:** Fit Platt / PAVA Isotonic probability calibration and split-conformal $[q_{10}, q_{90}]$ padding strictly on held-out validation slices, and enforce 7 explicit `AbstentionReason` gates outputting `action_state = "NO_TRADE"` whenever confidence, evidence, freshness, or net-cost edge fails.
+- **Rationale:** Guarantees conservative risk abstinence under weak or degraded inputs.
+
+### ADR-025: Purged Walk-Forward, Holm-Bonferroni HAC Attribution & Honest `BLOCKED` Empirical Gate
+- **Context:** Financial event streams exhibit overlapping horizon windows, content-hash/amendment clustering, and serial correlation; meanwhile `tickerwatch.db` currently lacks Indian company filings, intraday bars, real matured outcomes, and consensus estimates.
+- **Decision:** Mandate chronological purged expanding/rolling walk-forward folds with horizon-scaled embargoing, hash/revision purging, `LeakageAuditor`, Newey-West HAC Diebold-Mariano + moving-block bootstrap 95% CIs + Holm-Bonferroni FWER control, and hard `ReadinessStatus.BLOCKED` rejection of real-data progression until verified market/disclosure data arrives. Synthetic experiments are strictly tagged `is_synthetic=True`.
+- **Rationale:** Upholds empirical honesty—verified predictive software without fabricating market alpha claims on insufficient data.
