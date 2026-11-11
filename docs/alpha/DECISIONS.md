@@ -37,6 +37,10 @@
 | **ADR-023** | Separate `REACTION` vs `EXECUTABLE` Targets & Explicit `NEUTRAL_NO_TRADE` Cost Hurdles | **ACCEPTED** | 2026-11-11 | Prevents backtest fill illusion and forced trading of sub-cost moves |
 | **ADR-024** | Validation-Only Calibration (Platt/Isotonic/Conformal) & 7-Rule `NO_TRADE` Abstention | **ACCEPTED** | 2026-11-11 | Calibrated uncertainty boundaries; blocks low-confidence or illiquid signals |
 | **ADR-025** | Purged Walk-Forward, Holm-Bonferroni HAC Attribution & Honest `BLOCKED` Empirical Gate | **ACCEPTED** | 2026-11-11 | Zero overlap/revision leakage, FWER control, hard ban on synthetic claims as live alpha |
+| **ADR-026** | Official RBI IST Localization & Fail-Closed Disabled Adapters Over WAF Scraping | **ACCEPTED** | 2026-11-11 | Eliminates 5.5h naive IST clock look-ahead on RBI feeds; honors HTTP 403/timeout blockers cleanly |
+| **ADR-027** | Dynamic Non-Expired Contract Resolver & Separated Cash/SSF/Index Mappings | **ACCEPTED** | 2026-11-11 | Eliminates stale hardcoded monthly futures symbols; isolates corporate vs macro/benchmark targets |
+| **ADR-028** | SQLite Trigger-Immutable Shadow Signal Ledger & Strict Synthetic Model Quarantine | **ACCEPTED** | 2026-11-11 | Cryptographic SHA-256 + UPDATE/DELETE aborts prevent retrofitting predictions; bars synthetic live claims |
+| **ADR-029** | Anti-Optimistic Limit Queue Fill Model & Decoupled 3-Layer Paper Execution | **ACCEPTED** | 2026-11-11 | Rejects touch-equals-fill fantasy; separates gross theoretical, executable, and post-statutory net returns |
 
 ---
 
@@ -298,3 +302,25 @@ The following items are explicitly tracked for resolution in subsequent phases:
 - **Context:** Financial event streams exhibit overlapping horizon windows, content-hash/amendment clustering, and serial correlation; meanwhile `tickerwatch.db` currently lacks Indian company filings, intraday bars, real matured outcomes, and consensus estimates.
 - **Decision:** Mandate chronological purged expanding/rolling walk-forward folds with horizon-scaled embargoing, hash/revision purging, `LeakageAuditor`, Newey-West HAC Diebold-Mariano + moving-block bootstrap 95% CIs + Holm-Bonferroni FWER control, and hard `ReadinessStatus.BLOCKED` rejection of real-data progression until verified market/disclosure data arrives. Synthetic experiments are strictly tagged `is_synthetic=True`.
 - **Rationale:** Upholds empirical honesty—verified predictive software without fabricating market alpha claims on insufficient data.
+
+---
+
+### ADR-026: Official RBI IST Localization & Fail-Closed Disabled Adapters Over WAF Scraping
+- **Context:** Live HTTP probing on `2026-11-11` revealed `https://www.rbi.org.in/pressreleases_rss.xml` returns `HTTP 200` with naive local IST timestamps (`Wed, 11 Nov 2026 18:10:00`), whereas NSE RSS timed out at `10.1s` and BSE/PIB/Moneycontrol returned `HTTP 403`. Meanwhile zero market-data broker/vendor keys exist in `.env`.
+- **Decision:** Localize naive RBI RSS strings strictly via `Asia/Kolkata` -> UTC, respect conditional `ETag`/`304`, keep inaccessible news & unconfigured market feeds as fail-closed disabled adapters with secret-redacted `ProviderAuthError`, and never scrape WAF-protected endpoints or present mocked streams as live.
+- **Rationale:** Prevents a 5.5-hour future look-ahead error on central bank announcements while maintaining strict compliance and honest operational observability.
+
+### ADR-027: Dynamic Non-Expired Contract Resolver & Separated Cash/SSF/Index Mappings
+- **Context:** Hardcoded monthly futures symbols silently rot after expiry, and blending equity cash, single-stock futures, and index futures obscures event exposure.
+- **Decision:** Build `LiveInstrumentUniverse` (`6.0.0-alpha`) resolving non-expired futures contracts as of `as_of_date` (`ACTIVE`, `PRE_ROLLOVER`, `EXPIRED`, `HALTED`, `SUSPENDED`) and separating `cash_equity`, `single_stock_futures`, `index_futures`, and `contextual_benchmarks`.
+- **Rationale:** Eliminates expired derivative mapping bugs and cleanly routes corporate filings to issuers vs macro releases to `NIFTY_FUT`.
+
+### ADR-028: SQLite Trigger-Immutable Shadow Signal Ledger & Strict Synthetic Model Quarantine
+- **Context:** Live validation loses credibility if predictions can be edited post-hoc or if models trained on synthetic fixtures (`is_synthetic=True`) emit live shadow signals.
+- **Decision:** Enforce SQLite `BEFORE UPDATE` / `BEFORE DELETE` abort triggers on both `shadow_predictions` and `shadow_outcomes` alongside per-entry SHA-256 checksums, and require `ModelEligibilityAuditor` verification (`is_synthetic=False`, frozen schema, SHA-256 bundle match, zero leakage, explicit approval) before granting `MODEL_ELIGIBLE`.
+- **Rationale:** Guarantees cryptographic auditability and quarantines synthetic models strictly to `SYNTHETIC_DIAGNOSTIC_ONLY` telemetry.
+
+### ADR-029: Anti-Optimistic Limit Queue Fill Model & Decoupled 3-Layer Paper Execution
+- **Context:** Assuming a limit order fills 100% whenever market prices merely touch the limit level overstates paper execution returns, while conflating theoretical mid reaction with post-cost returns masks execution drag.
+- **Decision:** Model L2 depth sweeps capped by participation, L1 BBO spread crossing, conservative OHLCV fallbacks, and strict limit queue rules (`LIMIT_TOUCHED_ONLY_NO_TRADE_THROUGH` or configurable partial fraction), reporting separate `gross_theoretical_return`, `estimated_executable_return`, and `net_return_after_costs`.
+- **Rationale:** Enables realistic latency, slippage, and order-type stress testing without modifying underlying predictive models.

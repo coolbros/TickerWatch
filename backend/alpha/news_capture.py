@@ -73,6 +73,7 @@ class BaseNewsAdapter(ABC):
 
         return ConnectorHealth(
             connector_id=self.adapter_id,
+            name=self.name,
             enabled=self.enabled,
             status=status,
             poll_interval_seconds=self.poll_interval_seconds,

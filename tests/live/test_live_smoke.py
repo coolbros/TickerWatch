@@ -61,3 +61,26 @@ async def test_live_sec_edgar_submissions():
     assert first_filing.tickers == ["AAPL"]
     assert first_filing.source_item_id.startswith("sec_")
     assert "form" in first_filing.raw_metadata
+
+
+@pytest.mark.live
+@pytest.mark.asyncio
+async def test_live_rbi_press_releases_rss(tmp_path):
+    """Live opt-in smoke test against official Reserve Bank of India (RBI) Press Releases RSS."""
+    from backend.alpha.live_news_adapters import RBIPressReleaseAdapter
+    from backend.alpha.storage import RawPayloadStore
+
+    adapter = RBIPressReleaseAdapter(
+        enabled=True,
+        raw_payload_store=RawPayloadStore(base_dir=str(tmp_path / "rbi_raw")),
+    )
+    events, next_cursor, quarantined = await adapter.fetch_news_events(cursor=None)
+    assert len(events) > 0
+    assert events[0].provider_id == "rbi_press_rss"
+    assert events[0].published_at_utc is not None
+    assert events[0].published_at_utc.tzinfo == timezone.utc
+    assert events[0].raw_payload_ref is not None
+    assert next_cursor is not None
+    # Conditional 304 check
+    events2, _, _ = await adapter.fetch_news_events(cursor=next_cursor)
+    assert events2 == []

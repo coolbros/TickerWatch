@@ -39,7 +39,7 @@ To prevent the catastrophic risks endemic to quantitative trading projects—suc
    [ PHASE 5: Predictive Multi-Horizon Model Training & Probability Calibration ] [SOFTWARE COMPLETE / EMPIRICAL DATA BLOCKED]
                            | (Gate 5 Sign-Off)
                            v
-   [ PHASE 6: Realistic Execution Simulation, Indian Cost Modeling & Latency Stress ]
+   [ PHASE 6: Live Shadow Acquisition, Execution Simulation & Validation ] [SOFTWARE COMPLETE / EMPIRICAL MARKET DATA PENDING]
                            | (Gate 6 Sign-Off)
                            v
    [ PHASE 7: Real-Time Hot-Path Scaffolding & ONNX Runtime Engine Optimization ]
@@ -153,11 +153,11 @@ To prevent the catastrophic risks endemic to quantitative trading projects—suc
   - Out-of-sample directional accuracy $> 56.0\%$ across active signals.
   - [ ] Falsification test: If directional accuracy $\le 52.0\%$ or Information Coefficient $\le 0.02$ on real OOS markets, halt model promotion.
   - [x] **Software Infrastructure Verified:** Phase 4 causal hardening (WP-A), 87-feature causal registry (WP-C), dual Reaction/Executable target builder (WP-D), dependency-free baseline/linear/tree/quantile estimators (WP-E), validation-only calibration & 7-rule NO_TRADE abstention (WP-F), purged walk-forward + `LeakageAuditor` (WP-G), Holm-Bonferroni HAC attribution + EXECUTABLE-only backtester (WP-H), SHA-256 `LocalModelRegistry` (WP-I), synthetic + zero-signal null experiments & 19-gate test suite (WP-J).
-  - [ ] **Empirical Real-Data Promotion BLOCKED:** `RealDataReadinessAuditor` confirmed `IN=BLOCKED` (`0` Indian company filings), `US=INSUFFICIENT_DATA` (`0` real market bars, `0` real matured outcomes, `0%` consensus, 1.5s backfill-compressed timestamps). **Cannot advance to Phase 6 empirical simulation or live capital** until real multi-year event & market archives satisfy `PHASE_5_DATA_REQUIREMENTS.md`.
+  - [x] **Integrated via Pull Request #3 (`5d603be`):** Normal merge commit preserving all 12 granular commits with **202/202** offline tests + **2/2** SEC opt-in live smoke tests passing. Empirical real-market alpha remains **`BLOCKED`** pending Phase 6/external data acquisition.
 
 ---
 
-### Phase 6: Realistic Execution Simulation, Indian Cost Modeling & Latency Stress
+### Phase 6: Live Data Acquisition, Shadow Operation, Execution Simulation & Signal Validation (SOFTWARE VERIFIED / EMPIRICAL MARKET SESSIONS PENDING)
 - **Objective:** Build the execution backtester incorporating empirical L2 depth, queue priority, statutory Indian fees, and latency degradation.
 - **Mandatory Tasks:**
   - Implement statutory transaction costs (STT 0.02% sell, NSE turnover, GST 18%, stamp duty, brokerage).
@@ -166,7 +166,8 @@ To prevent the catastrophic risks endemic to quantitative trading projects—suc
 - **Gate 6 Verification:**
   - Strategy generates net annualized Sharpe $> 1.5$ post-costs at $\Delta t = 20\text{ms}$ ($H5$ validation).
   - Monotonic alpha decay confirmed across latency increments ($H4$ validation).
-  - Falsification test: If net returns are non-positive after statutory costs, project cannot progress.
+  - [ ] Empirical Falsification Gate: Collect >= 20–30 live trading sessions (`ShadowValidationEvaluator`) with authorized Indian market & corporate feeds; if net executable returns are non-positive after statutory costs, halt progression to live capital.
+  - [x] **Software Phase 6 Infrastructure Verified (WP-A..L):** Live RBI Press Releases RSS verified (`HTTP 200`, `Asia/Kolkata` localization) alongside SEC EDGAR & SEC Press RSS (`3/3` opt-in live smoke tests passing); unavailable/unconfigured Indian corporate (`NSE`/`BSE`) & market feeds (`Kite`/`TrueData`) fail closed safely without mock substitution; dynamic contract resolver (`LiveInstrumentUniverse`), immutable capture & trigger-enforced `ShadowSignalLedger`, paper L2/L1/limit/OHLCV `ShadowExecutionSimulator`, 5-plane `ShadowOperationalMonitor`, 6-gate `ModelEligibilityAuditor` (quarantining synthetic models), and `0.0`-diff `LiveReplayParityVerifier` verified offline.
 
 ---
 

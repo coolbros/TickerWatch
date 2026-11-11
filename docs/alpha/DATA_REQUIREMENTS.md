@@ -171,3 +171,18 @@ Before any empirical claim about $P(\Delta F_{t+h} \mid E_t, H_t, M_t)$ can be a
 - **India (`IN`): `BLOCKED`** — Only 4 general Moneycontrol wrap-ups ingested, 0 NSE/BSE corporate disclosures, 0.00-year span (target $\ge 5,000$ events, $\ge 2.0$ years), and 0 real market bars/quotes.
 - **US (`US`): `INSUFFICIENT_DATA`** — 3,038 SEC filings exist (primarily AAPL/AMZN/MSFT Form 4/header metadata; 3,041/3,042 classify `ROUTINE_ADMINISTRATIVE`), all `observed_at_utc` compressed into a 1.5s batch backfill window (`2026-11-08T09:34Z`), 0 real market ticks, 0% consensus expectations.
 - **Overall Empirical Modeling Status:** **`BLOCKED`** (`docs/alpha/PHASE_5_DATA_READINESS.md` & `docs/alpha/PHASE_5_DATA_REQUIREMENTS.md`). Phase 5 empirical alpha validation awaits external historical market bars (1m OHLCV / L1 quotes + corporate action & rollover ledgers) and multi-year primary exchange announcements.
+
+---
+
+## 9. Phase 6 Live Source Accessibility & Observation Requirements
+
+Live discovery on `2026-11-11` (`docs/alpha/PHASE_6_DATA_SOURCE_AUDIT.md`, `docs/alpha/PHASE_6_AUTHORIZATION_MATRIX.md`) established:
+
+- **Verified Live Operational Feeds:**
+  - **RBI Press Releases RSS (`IN`):** Public XML verified `HTTP 200 OK` (`10` releases), conditional `ETag`/`304`, requires strict `Asia/Kolkata` -> UTC localization on naive local strings.
+  - **SEC EDGAR Submissions JSON & SEC Press Releases RSS (`US`):** Verified `HTTP 200 OK` with declared `SEC_USER_AGENT` and `<= 10 req/s` limiter.
+- **Explicit Access Blockers Requiring External Subscriptions / Exchange Licensing:**
+  - **NSE Corporate RSS (`nse_corporate_rss`):** `ReadTimeout` (`10.1s`, `NSE_RSS_ENABLED=false`).
+  - **BSE Notices (`bse_notices_xml`), PIB FinMin RSS, Moneycontrol:** `HTTP 403` bot/WAF protection (must never scrape/circumvent).
+  - **Real-Time Indian Market Data (`Zerodha Kite`, `TrueData`, `GlobalDataFeeds`, `Upstox`, `Dhan`, `Breeze`, `NSE Direct`):** Zero credentials configured (`NOT_SET`). Scaffolds remain explicitly disabled without emitting mock data as live.
+- **20–30 Market Session Protocol Gate:** Even once market/corporate feeds connect cleanly, real-world validation requires accumulating **>= 20 trading sessions (preferred 30)** with matured executable outcome labels and independent events (`ShadowValidationEvaluator`) prior to advancing to Phase 6 empirical sign-off or Phase 7.
