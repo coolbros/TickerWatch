@@ -145,6 +145,12 @@ def _fit_logistic_l2(
     theta = np.concatenate([w, [b]])
     reg_diag = np.diag([l2_reg] * d + [1e-6])
 
+    def _obj_log(th: np.ndarray) -> float:
+        pr = np.clip(_sigmoid(Xa @ th), 1e-9, 1.0 - 1e-9)
+        nll = -float(np.sum(y_bin * np.log(pr) + (1.0 - y_bin) * np.log(1.0 - pr)))
+        return nll + 0.5 * float(th @ (reg_diag @ th))
+
+    cur_obj = _obj_log(theta)
     for _ in range(max_iter):
         logits = Xa @ theta
         p = _sigmoid(logits)
@@ -155,11 +161,19 @@ def _fit_logistic_l2(
             step = np.linalg.solve(H, grad)
         except np.linalg.LinAlgError:
             break
-        theta_new = theta - step
-        if float(np.max(np.abs(step))) < 1e-6:
-            theta = theta_new
+        alpha_ls = 1.0
+        accepted = False
+        while alpha_ls >= 1e-3:
+            cand = theta - alpha_ls * step
+            cand_obj = _obj_log(cand)
+            if cand_obj <= cur_obj + 1e-12:
+                theta = cand
+                cur_obj = cand_obj
+                accepted = True
+                break
+            alpha_ls *= 0.5
+        if not accepted or float(np.max(np.abs(alpha_ls * step))) < 1e-6:
             break
-        theta = theta_new
     return (theta[:-1], float(theta[-1])), pos_rate
 
 
