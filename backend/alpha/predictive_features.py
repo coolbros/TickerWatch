@@ -337,7 +337,7 @@ class PointInTimeFeatureBuilder:
             "m_dir_bearish": 1.0 if market_regime.market_direction == MarketDirection.BEARISH else 0.0,
             "m_vol_elevated": 1.0 if market_regime.volatility_regime == VolatilityRegime.ELEVATED else 0.0,
             "m_liq_thin": 1.0 if market_regime.liquidity_regime in (LiquidityRegime.THIN, LiquidityRegime.CLOSED_OR_HALTED) else 0.0,
-            "m_session_open": 1.0 if (in_sess or market_regime.session_state == MarketSessionStatus.REGULAR_OPEN) else 0.0,
+            "m_session_open": 1.0 if (in_sess or market_regime.session_state == MarketSessionStatus.OPEN) else 0.0,
             "m_session_progress": session_prog,
             "m_is_first_30m": first_30,
             "m_is_last_30m": last_30,
