@@ -315,6 +315,7 @@ class DisabledNewsSourceAdapter(BaseNewsAdapter):
     async def health(self) -> ConnectorHealth:
         return ConnectorHealth(
             connector_id=self.adapter_id,
+            name=self.name,
             enabled=False,
             status=ConnectorStatus.DISABLED,
             poll_interval_seconds=self.poll_interval_seconds,
@@ -438,6 +439,7 @@ class SECEdgarLiveNewsAdapter(BaseNewsAdapter):
             return ConnectorHealth(
                 connector_id=self.adapter_id,
                 enabled=self.enabled,
+                name=self.name,
                 status=ConnectorStatus.AUTH_ERROR,
                 poll_interval_seconds=self.poll_interval_seconds,
                 last_error=_redact_secret_fragments(self._connector.last_error or "Invalid SEC configuration", [self._user_agent]),

@@ -269,10 +269,11 @@ class ResilientMarketFeedRunner:
                     last_hb_ns = get_monotonic_ns()
                     async for ev in self.provider.stream_events():
                         now_ns = get_monotonic_ns()
-                        if (now_ns - last_hb_ns) / 1_000_000_000.0 > self.heartbeat_interval_seconds:
-                            # Heartbeat interval exceeded between arriving packets
-                            if self.provider.integrity_monitor.is_stale():
-                                self.telemetry.heartbeat_timeouts += 1
+                        if (
+                            (now_ns - last_hb_ns) / 1_000_000_000.0 > self.heartbeat_interval_seconds
+                            or self.provider.status == FeedStatus.STALE
+                        ):
+                            self.telemetry.heartbeat_timeouts += 1
                         last_hb_ns = now_ns
 
                         self._enqueue_with_backpressure(ev)
