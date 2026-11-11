@@ -325,3 +325,52 @@ Phase 4 elevates the Phase 2 alignment layer and Phase 3 Financial NLP layer int
 - `backend/alpha/market_context.py`: Decoupled as-of microstructure and market regime builder ($M_t$) strictly bounded at `<= decision_timestamp`.
 - `backend/alpha/historical_intelligence.py`: Unified Phase 4 pipeline and `HistoricalIntelligenceRepresentation` (`4.0.0-alpha`) integrated non-destructively into `FinancialNLPPipeline`.
 - `backend/alpha/historical_evaluation.py` & `scripts/alpha_historical_benchmark.py`: Chronological zero-leakage IR evaluator (`Precision@k`, `Recall@k`, `MRR`, `nDCG@k`) and 6-check event-study invariant verifier.
+
+---
+
+## 9. Phase 5 Implementation Architecture: Predictive Modelling, Walk-Forward Validation & Alpha Attribution
+
+Phase 5 implements the end-to-end research pipeline testing $P(\Delta F_{t+h} \mid E_t, H_t, M_t)$ while strictly isolating empirical data gates from synthetic software verification:
+
+```
++====================================================================================================+
+|                      PHASE 5 PREDICTIVE MODELLING, PURGED WALK-FORWARD & ATTRIBUTION               |
++====================================================================================================+
+
+   [ EMPIRICAL READINESS AUDITOR ] ---> BLOCKED on current DB (3,042 real news / 0 real ticks / 0 IN filings)
+                  |
+                  v (Labeled is_synthetic=True verification track OR future READY empirical cohort)
+   [ CAUSAL FEATURE REGISTRY (87 Features: E=38, H=26, M=23) & TARGET ENGINE ]
+   - Strict Model Ablation Configs: A (M), B (E), C (E+H), D (E+H+M), E (E+M)
+   - Dual Outcomes: REACTION (research/total) vs EXECUTABLE (latency + spread + cost hurdle -> NO_TRADE)
+                  |
+                  v
+   [ PURGED CHRONOLOGICAL WALK-FORWARD SPLITTER & LEAKAGE AUDITOR ]
+   - Expanding & Rolling Splits (No random CV)
+   - Outcome Overlap Purging, Duplicate Content Hash & Revision Purge, Horizon-Scaled Embargo
+   - FoldSafeFeatureTransformer (Train-Fold-Only Imputation/Z-Clipping)
+                  |
+                  v
+   [ CLASSICAL TABULAR MODELS + VALIDATION-ONLY CALIBRATION ]
+   - Baselines (Zero, Mean, Rolling Inst, Subtype Shrinkage)
+   - Ridge, ElasticNet, Logistic, RF, GBDT (+Quantile Pinball Heads), Linear Quantile, Gated MLP
+   - Platt Scaling / Isotonic PAVA + Split-Conformal [q10, q90] + 7 NO_TRADE Abstention Gates
+                  |
+                  v
+   [ ALPHA ATTRIBUTOR & COST-AWARE EXECUTABLE BACKTESTER ]
+   - Newey-West HAC Diebold-Mariano + Moving-Block Bootstrap 95% CIs + Holm-Bonferroni FWER
+   - ResearchBacktester: Strictly EXECUTABLE labels, brokerage/SEBI/STT/spread/slippage/latency sweeps
+                  |
+                  v
+   [ LOCAL MODEL REGISTRY (SQLite + JSON + SHA-256 Verified Artifact Bundles) ]
+```
+
+### Phase 5 Module Directory:
+- `backend/alpha/data_readiness.py`: Real-Data Readiness Auditor separating real filings/bars/labels/consensus from synthetic fixtures (`READY` / `INSUFFICIENT_DATA` / `BLOCKED`).
+- `backend/alpha/feature_registry.py` & `backend/alpha/predictive_features.py`: Versioned 87-feature contract (`5.0.0-alpha`), currency-isolated numeric extraction, futures basis metadata, and train-fold-only `FoldSafeFeatureTransformer`.
+- `backend/alpha/predictive_targets.py`: `PredictiveTargetBuilder` separating `REACTION` vs `EXECUTABLE` targets with conservative IN/US transaction cost hurdles (`ActionableDirectionClass`).
+- `backend/alpha/predictive_models.py`: Dependency-free vectorized NumPy baselines & classical tabular models (`RIDGE`, `ELASTIC_NET`, `LOGISTIC_DIRECTION`, `RANDOM_FOREST`, `GBDT`, `QUANTILE_LINEAR`, sample-gated `COMPACT_MLP`).
+- `backend/alpha/prediction_uncertainty.py`: Validation-only Platt/Isotonic calibration, split-conformal intervals, calibration metrics, and 7-rule `NO_TRADE` abstention engine.
+- `backend/alpha/walk_forward.py` & `backend/alpha/leakage_audit.py`: Purged chronological walk-forward splitter with horizon-scaled embargoing and adversarial `LeakageAuditor`.
+- `backend/alpha/predictive_evaluation.py` & `backend/alpha/research_backtest.py`: Pure-NumPy OOS metrics, Holm-Bonferroni + Newey-West DM + moving-block bootstrap `AlphaAttributor`, and strict `EXECUTABLE`-only `ResearchBacktester`.
+- `backend/alpha/model_registry.py` & `backend/alpha/predictive_pipeline.py`: SHA-256 verified artifact registry and end-to-end experiment runner (`scripts/alpha_phase5_experiment.py`).
