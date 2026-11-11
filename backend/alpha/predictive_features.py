@@ -126,15 +126,17 @@ class PointInTimeFeatureBuilder:
         currency = CurrencyUnit.UNKNOWN
         pct_val: Optional[float] = None
         for m in ([primary_m] if primary_m else []) + list(rep.extraction.metrics):
-            if monetary_val is None and m.normalized_value is not None and m.unit in (
+            if monetary_val is None and not m.is_percentage and not m.is_basis_points and m.currency in (
                 CurrencyUnit.INR,
                 CurrencyUnit.USD,
                 CurrencyUnit.EUR,
+                CurrencyUnit.GBP,
+                CurrencyUnit.JPY,
             ):
                 monetary_val = float(abs(m.normalized_value))
                 currency = m.currency
-            if pct_val is None and m.unit == CurrencyUnit.PERCENT and m.raw_value is not None:
-                pct_val = float(m.raw_value)
+            if pct_val is None and m.is_percentage:
+                pct_val = float(m.normalized_value)
 
         has_surprise = sur.surprise_category not in (
             SurpriseCategory.UNAVAILABLE_EXPECTATION,
