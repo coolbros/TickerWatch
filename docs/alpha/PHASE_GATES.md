@@ -36,7 +36,7 @@ To prevent the catastrophic risks endemic to quantitative trading projects—suc
    [ PHASE 4: Historical Event Vector Retrieval & Contextual Intelligence ] [SIGNED OFF - GATE 4 PASSED]
                            | (Gate 4 Sign-Off)
                            v
-   [ PHASE 5: Predictive Multi-Horizon Model Training & Probability Calibration ] <=== NEXT PHASE
+   [ PHASE 5: Predictive Multi-Horizon Model Training & Probability Calibration ] <=== CURRENT PHASE
                            | (Gate 5 Sign-Off)
                            v
    [ PHASE 6: Realistic Execution Simulation, Indian Cost Modeling & Latency Stress ]
@@ -138,7 +138,7 @@ To prevent the catastrophic risks endemic to quantitative trading projects—suc
 - **Gate 4 Verification:**
   - [x] Zero look-ahead leakage verified: double-lock enforcement (`system_available_at_utc < decision_timestamp` and `outcome_end_ts <= decision_timestamp`) with explicit immature/resolution masking.
   - [x] Exact vector search scan $< 1\text{ms}$ on CPU; full end-to-end Top-5 CPU retrieval (incl. query ONNX INT8 encode + SQLite filtering) at **6.60–10.92 ms p95**, lifting nDCG@5 from `0.8700` (Jaccard) / `0.8496` (BM25) to **0.9854 (ONNX Dense)** and **0.9621 (ONNX Hybrid)** with **1.0000 MRR**.
-  - [x] Decoupled `HistoricalIntelligenceRepresentation` (`v4.0.0-alpha`) and `MarketRegimeContext` ready for Model C vs Model B empirical $H2$ predictive loss testing upon Phase 5 ingestion of authorized Indian historical filings and intraday tick archives.
+  - [x] Integrated via Pull Request #2 normal merge commit (`66b9328`) and hardened in Phase 5 WP-A (`PHASE_5_PHASE_4_REMEDIATION.md`: IST/ET timezone localization, bitemporal revision reconstruction, BGE-small CLS-512 parity v2, REACTION vs EXECUTABLE separation, and pre-event rolling beta).
 
 ---
 

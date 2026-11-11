@@ -47,7 +47,9 @@ As verified in [`PHASE_4_CORPUS_COVERAGE.md`](PHASE_4_CORPUS_COVERAGE.md), the e
 4. **Futures Expiry & Corporate Action Provenance Dependency:**
    - Historical futures price series stitched naively across monthly expiry rolls introduce artificial price jumps unrelated to news catalysts. Phase 4 `EventStudyEngine` explicitly returns `ROLLOVER_INVALID` whenever `contract_id` changes without an audited `FuturesRolloverSpec`, and depends on corporate action multiplier tables (`splits`, `bonuses`, `extraordinary dividends`) when evaluating long `5d` cash-equity windows.
 5. **Provider Receipt Time (`local_received_at_utc`) Backfill Constraint:**
-   - Legacy bulk historical archives (e.g., NSE historical PDF zip archives or old SEC EDGAR index dumps) often record only `published_at_utc` without historical socket arrival timestamps (`local_received_at_utc`). Importers must conservatively treat historical archive availability cautiously and never confuse delayed PDF ingestion timestamps with microsecond live wire arrival times during millisecond latency studies.
+   - Legacy bulk historical archives (e.g., NSE/BSE PDF zip archives or old SEC EDGAR index dumps) often record exchange-local wall-clock times (`Asia/Kolkata` for NSE/BSE/RBI; DST-aware `America/New_York` for SEC EDGAR) rather than explicit UTC offsets, and omit socket arrival telemetry (`local_received_at_utc`). Phase 5 Work Package A (`A1`) remediated `backend/alpha/historical_import.py` to enforce explicit source-timezone localization before UTC conversion and retain full `_timestamp_provenance` metadata; delayed archival ingestion must never be confused with sub-millisecond live wire arrival.
+6. **Reaction vs. Executable Return Gap:**
+   - Pre-event reaction anchors (`PRE_EVENT_AS_OF`) capture total economic repricing including overnight or wire-delay gaps, NOT achievable post-receipt trading P&L. Downstream modeling strictly separates `REACTION` from `POST_DECISION_EXECUTABLE` outcomes (`A4`) and uses strictly pre-event rolling beta or labeled `SIMPLE_MARKET_ADJUSTED` differences (`A5`).
 
 ---
 

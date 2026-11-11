@@ -336,3 +336,107 @@ def test_primary_vs_contextual_instrument_selection():
     )
     prim_macro, _, _ = select_study_instruments(macro_rep, MarketJurisdiction.IN)
     assert prim_macro == "NSE:NIFTY_FUT:CURRENT"
+
+
+def test_reaction_vs_executable_spread_latency_and_pre_event_beta():
+    """
+    Verify A4 (REACTION vs EXECUTABLE labels with pipeline latency, bid/ask spread, next-session open)
+    and A5 (pre-event rolling OLS beta strictly excluding post-event prices).
+    """
+    from backend.alpha.outcomes import BenchmarkAdjustmentMethod, OutcomeLabelType
+
+    cal = MarketCalendarConfig.for_jurisdiction(MarketJurisdiction.IN)
+    decision_ts = datetime(2026, 3, 2, 5, 0, tzinfo=timezone.utc)
+    obs = []
+    bench = []
+    p_stock = 1000.0
+    p_bench = 20000.0
+    for m in range(-20, 15):
+        ts = decision_ts + timedelta(minutes=m)
+        if m < 0:
+            rb = 0.004 if (m % 2 == 0) else -0.002
+            p_bench = p_bench * (1.0 + rb)
+            p_stock = p_stock * (1.0 + 2.0 * rb)
+        elif m == 0:
+            p_bench = p_bench * 1.001
+            p_stock = p_stock * 1.010
+        elif m == 1:
+            p_bench = p_bench * 1.001
+            p_stock = p_stock * 1.012
+        else:
+            p_bench = p_bench * 1.001
+            p_stock = p_stock * 1.005
+
+        obs.append(
+            PriceObservation(
+                timestamp_utc=ts,
+                price=round(p_stock, 4),
+                bid=round(p_stock - 1.0, 4),
+                ask=round(p_stock + 1.0, 4),
+                volume=500.0,
+            )
+        )
+        bench.append(PriceObservation(timestamp_utc=ts, price=round(p_bench, 4)))
+
+    engine = EventStudyEngine(
+        calendar=cal,
+        benchmark_mode=BenchmarkAdjustmentMethod.PRE_EVENT_ROLLING_BETA,
+        beta_lookback_obs=20,
+        beta_min_samples=10,
+    )
+    pair = engine.compute_reaction_and_executable_pair(
+        event_id="evt_pair_a4_a5",
+        instrument_id="NSE:TCS:EQ",
+        horizon=OutcomeHorizon.M5,
+        event_timestamp_utc=decision_ts,
+        decision_timestamp_utc=decision_ts,
+        observations=obs,
+        pipeline_latency_ms=100.0,
+        executable_side=1,
+        benchmark_instrument="NSE:NIFTY_FUT:CURRENT",
+        benchmark_observations=bench,
+        is_synthetic=True,
+    )
+    lbl_react = pair[OutcomeLabelType.REACTION]
+    lbl_exec = pair[OutcomeLabelType.EXECUTABLE]
+
+    assert lbl_react.label_type == OutcomeLabelType.REACTION
+    assert lbl_exec.label_type == OutcomeLabelType.EXECUTABLE
+    assert lbl_exec.outcome_start_price_ts > lbl_react.decision_timestamp_utc
+    assert lbl_exec.entry_quote_type == "EXEC_ASK"
+    assert lbl_exec.entry_spread_bps_cost is not None and lbl_exec.entry_spread_bps_cost > 15.0
+    assert lbl_exec.simple_return < lbl_react.simple_return
+
+    assert lbl_react.benchmark_adjustment_method == BenchmarkAdjustmentMethod.PRE_EVENT_ROLLING_BETA
+    assert lbl_react.estimated_beta == pytest.approx(2.0, abs=0.05)
+    assert lbl_react.beta_sample_count is not None and lbl_react.beta_sample_count >= 10
+    assert lbl_react.beta_window_end_ts <= lbl_react.outcome_start_price_ts
+
+    # Verify next-session open skipping stray off-hours tick for EXECUTABLE mode
+    off_hrs_decision = datetime(2026, 3, 2, 12, 0, tzinfo=timezone.utc)  # 17:30 IST after close
+    next_open = datetime(2026, 3, 3, 3, 45, tzinfo=timezone.utc)  # 09:15 IST next day
+    ah_obs = [
+        PriceObservation(timestamp_utc=datetime(2026, 3, 2, 9, 55, tzinfo=timezone.utc) + timedelta(minutes=k), price=1000.0)
+        for k in range(5)
+    ] + [
+        PriceObservation(timestamp_utc=datetime(2026, 3, 2, 12, 5, tzinfo=timezone.utc), price=1040.0),  # Stray off-hours print
+    ] + [
+        PriceObservation(
+            timestamp_utc=next_open + timedelta(minutes=k),
+            price=1050.0 + k,
+            bid=1049.5 + k,
+            ask=1050.5 + k,
+        )
+        for k in range(10)
+    ]
+    exec_ah = EventStudyEngine(calendar=cal, anchor_mode=AnchorMode.POST_DECISION_EXECUTABLE).compute_outcome_label(
+        event_id="evt_ah_exec",
+        instrument_id="NSE:TCS:EQ",
+        horizon=OutcomeHorizon.M5,
+        event_timestamp_utc=off_hrs_decision,
+        decision_timestamp_utc=off_hrs_decision,
+        observations=ah_obs,
+        is_synthetic=True,
+    )
+    assert exec_ah.outcome_start_price_ts == next_open
+    assert exec_ah.entry_quote_type == "NEXT_SESSION_OPEN"

@@ -194,3 +194,42 @@ def test_exact_cosine_latency_scale():
     assert sims.shape == (n_corpus,)
     assert np.all((sims >= -1.0001) & (sims <= 1.0001))
     assert elapsed_ms < 100.0  # Typically ~2-8ms on CPU!
+
+
+def test_bge_preprocessing_parity_and_version_isolation(tmp_path):
+    """Verify A3 preprocessing parity (CLS, max_len=512, instruction prefix) and strict v1/v2 separation."""
+    from backend.alpha.event_embeddings import verify_bge_preprocessing_parity
+
+    enc = ONNXBgeSmallEncoder()
+    assert enc.model_version == EmbeddingModelVersion.BGE_SMALL_EN_V1_5_INT8_V2.value
+    assert enc.max_length == 512
+    assert enc.pooling_mode == "cls"
+
+    if not enc.is_available():
+        pytest.skip("Quantized BGE-small ONNX cache not present in local environment")
+
+    report = verify_bge_preprocessing_parity()
+    assert report["onnx_available"] is True
+    assert report["cls_token_id"] == 101
+    assert report["sep_token_id"] == 102
+    assert report["long_text_truncated_len"] == 512
+    assert report["doc_norm_cls"] == pytest.approx(1.0, abs=1e-4)
+    assert report["cls_vs_mean_doc_cosine"] < 0.99
+
+    db_file = tmp_path / "ver_isolation.db"
+    store = PersistentHistoricalEventStore(db_path=db_file)
+    nlp = get_nlp_pipeline()
+    t1 = datetime(2026, 2, 1, 5, 0, tzinfo=timezone.utc)
+    rep = nlp.process_raw_text("Infosys wins $300 million cloud modernization deal", decision_timestamp=t1, event_id="infy_v1")
+    store.upsert_event(rep, jurisdiction=MarketJurisdiction.IN)
+    store.save_embedding("infy_v1", EmbeddingModelVersion.BGE_SMALL_EN_V1_5_INT8.value, [0.0] * 384)
+
+    retriever = PersistentVectorRetriever(store=store)
+    ctx = retriever.retrieve(
+        query_headline="Infosys secures large cloud migration deal",
+        decision_timestamp=t1 + timedelta(days=5),
+        jurisdiction=MarketJurisdiction.IN,
+        mode=RetrievalMode.DENSE_SEMANTIC,
+    )
+    assert ctx.embedding_model_version == EmbeddingModelVersion.BGE_SMALL_EN_V1_5_INT8_V2.value
+    assert ctx.matches[0].semantic_similarity > 0.50

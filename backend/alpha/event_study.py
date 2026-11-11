@@ -3,11 +3,14 @@
 Computes verified multi-horizon post-event outcome labels (`1m`, `5m`, `30m`, `1h`, `1d`, `5d`)
 strictly respecting:
 1. Exchange trading calendars, session boundaries, overnight gaps, and holidays (NSE/BSE, US).
-2. Source observation resolution (prevents hallucinating intraday outcomes from daily bars).
-3. Trading halts, missing observations, stale quotes, and corporate action multipliers.
-4. Futures contract expiry and explicit rollover adjustment policies (prohibits silent stitching).
-5. Primary equity/single-stock-future vs contextual benchmark attribution.
-6. Point-in-time outcome maturity (`outcome_end_price_ts <= evaluation_decision_ts`).
+2. Explicit distinction between total event REACTION (`PRE_EVENT_AS_OF`) and post-receipt
+   EXECUTABLE outcomes (`POST_DECISION_EXECUTABLE`) accounting for pipeline latency,
+   next-session open execution, and bid-ask spreads.
+3. Source observation resolution (prevents hallucinating intraday outcomes from daily bars).
+4. Trading halts, missing observations, stale quotes, and corporate action multipliers.
+5. Futures contract expiry and explicit rollover adjustment policies (prohibits silent stitching).
+6. Causal benchmark-adjustment provenance (`SIMPLE_MARKET_ADJUSTED` vs pre-event rolling OLS beta).
+7. Point-in-time outcome maturity (`outcome_end_price_ts <= evaluation_decision_ts`).
 """
 
 from __future__ import annotations
@@ -17,15 +20,18 @@ from enum import Enum
 import math
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 from zoneinfo import ZoneInfo
+import numpy as np
 from pydantic import BaseModel, Field
 
 from backend.alpha.historical_import import MarketJurisdiction
 from backend.alpha.instruments import RelevanceTier
 from backend.alpha.nlp_pipeline import FinancialEventRepresentation
 from backend.alpha.outcomes import (
+    BenchmarkAdjustmentMethod,
     EventOutcomeLabel,
     OutcomeDataQualityStatus,
     OutcomeHorizon,
+    OutcomeLabelType,
     PriceObservation,
 )
 
@@ -140,7 +146,6 @@ class MarketCalendarConfig(BaseModel):
                 return datetime.combine(d, self.session_open_local, tzinfo=tz)
             if t < self.session_close_local:
                 return dt_loc
-            # At or after today's close -> next trading day open
             nd = self.next_trading_day(d, 1)
             return datetime.combine(nd, self.session_open_local, tzinfo=tz)
 
@@ -180,9 +185,6 @@ class MarketCalendarConfig(BaseModel):
     def advance_trading_days(self, start_utc: datetime, trading_days: int) -> Tuple[datetime, bool]:
         """
         Compute target timestamp `trading_days` valid exchange sessions forward.
-        - If start is within active trading hours: moves N trading days forward to same time of day.
-        - If start is pre-open on a trading day: day 1 ends at today's close; day N at (N-1)th next close.
-        - If start is post-close or non-trading day: day 1 ends at next trading day's close.
         """
         if self.is_24x7:
             return start_utc + timedelta(days=trading_days), False
@@ -198,12 +200,10 @@ class MarketCalendarConfig(BaseModel):
             return target_loc.astimezone(timezone.utc), True
 
         if self.is_trading_day(d) and t < self.session_open_local:
-            # First trading session completes today at close
             target_d = d if trading_days == 1 else self.next_trading_day(d, trading_days - 1)
             target_loc = datetime.combine(target_d, self.session_close_local, tzinfo=tz)
             return target_loc.astimezone(timezone.utc), True
 
-        # After close or holiday/weekend
         target_d = self.next_trading_day(d, trading_days)
         target_loc = datetime.combine(target_d, self.session_close_local, tzinfo=tz)
         return target_loc.astimezone(timezone.utc), True
@@ -229,14 +229,6 @@ def select_study_instruments(
 ) -> Tuple[Optional[str], List[str], Optional[str]]:
     """
     Separate direct primary corporate instruments from contextual/benchmark indices.
-
-    Rule:
-    - For individual corporate events (Earnings, Contracts, Guidance, Regulatory): select directly
-      affected cash equity or single-stock future as primary; treat NIFTY_FUT / SPY as contextual benchmark.
-    - For MACRO or systemic announcements: index future/benchmark may act as primary instrument.
-
-    Returns:
-        (primary_instrument_id, contextual_instrument_ids, default_benchmark_id)
     """
     default_bench = "NSE:NIFTY_FUT:CURRENT" if jurisdiction == MarketJurisdiction.IN else "US:SPY:EQ"
     is_macro = rep.classification.primary_family.value in ("MACRO", "MACROECONOMIC") or (
@@ -282,8 +274,10 @@ def select_study_instruments(
 class EventStudyEngine:
     """
     Computes causally verified multi-horizon market outcomes for historical events.
-    Handles calendar sessions, overnight gaps, holidays, halts, resolution limits,
-    corporate action factors, futures contract rollovers, and benchmark adjustments.
+    Separates REACTION outcomes (anchored pre-event to measure market repricing) from
+    EXECUTABLE outcomes (anchored post-receipt + latency within active market sessions
+    and accounting for bid-ask spread).
+    Supports explicit SIMPLE_MARKET_ADJUSTED vs strictly pre-event PRE_EVENT_ROLLING_BETA.
     """
 
     def __init__(
@@ -291,16 +285,38 @@ class EventStudyEngine:
         calendar: Optional[MarketCalendarConfig] = None,
         rollover_specs: Optional[List[FuturesRolloverSpec]] = None,
         anchor_mode: AnchorMode = AnchorMode.PRE_EVENT_AS_OF,
-        benchmark_beta: float = 1.0,
+        pipeline_latency_ms: float = 0.0,
+        executable_side: int = 0,  # 0=mid/close (+spread metadata), +1=cross ask->bid, -1=cross bid->ask
+        benchmark_mode: BenchmarkAdjustmentMethod = BenchmarkAdjustmentMethod.PRE_EVENT_ROLLING_BETA,
+        benchmark_beta: Optional[float] = None,  # Legacy explicit constant beta override
+        beta_lookback_obs: int = 30,
+        beta_min_samples: int = 10,
         max_stale_pre_seconds: float = 432000.0,  # 5 days max lookback across long weekends
     ) -> None:
         self.calendar = calendar or MarketCalendarConfig.for_jurisdiction(MarketJurisdiction.IN)
         self.anchor_mode = anchor_mode
+        self.pipeline_latency_ms = max(0.0, float(pipeline_latency_ms))
+        self.executable_side = executable_side
+        self.benchmark_mode = (
+            BenchmarkAdjustmentMethod.FIXED_BETA_LEGACY
+            if benchmark_beta is not None
+            else benchmark_mode
+        )
         self.benchmark_beta = benchmark_beta
+        self.beta_lookback_obs = beta_lookback_obs
+        self.beta_min_samples = beta_min_samples
         self.max_stale_pre_seconds = max_stale_pre_seconds
         self._rollover_map: Dict[Tuple[str, str], FuturesRolloverSpec] = {}
         for spec in rollover_specs or []:
             self._rollover_map[(spec.from_contract_id, spec.to_contract_id)] = spec
+
+    @property
+    def label_type(self) -> OutcomeLabelType:
+        return (
+            OutcomeLabelType.REACTION
+            if self.anchor_mode == AnchorMode.PRE_EVENT_AS_OF
+            else OutcomeLabelType.EXECUTABLE
+        )
 
     def estimate_bar_resolution_seconds(
         self,
@@ -336,31 +352,52 @@ class EventStudyEngine:
         self,
         observations: Sequence[PriceObservation],
         decision_ts: datetime,
-    ) -> Tuple[Optional[PriceObservation], OutcomeDataQualityStatus, Optional[str]]:
+    ) -> Tuple[Optional[PriceObservation], OutcomeDataQualityStatus, Optional[str], Optional[str]]:
         if not observations:
-            return None, OutcomeDataQualityStatus.MISSING_DATA, "No price observations supplied"
+            return None, OutcomeDataQualityStatus.MISSING_DATA, "No price observations supplied", None
 
         if self.anchor_mode == AnchorMode.PRE_EVENT_AS_OF:
             pre = [o for o in observations if o.timestamp_utc <= decision_ts]
             if not pre:
-                return None, OutcomeDataQualityStatus.MISSING_DATA, "No pre-event observation at or before decision_ts"
+                return None, OutcomeDataQualityStatus.MISSING_DATA, "No pre-event observation at or before decision_ts", None
             cand = pre[-1]
             if cand.is_halted:
-                return cand, OutcomeDataQualityStatus.HALTED_TRADING, "Market halted at pre-event anchor"
-            # Check gap across non-holiday trading days
+                return cand, OutcomeDataQualityStatus.HALTED_TRADING, "Market halted at pre-event anchor", "PRE_EVENT_REF"
             trading_gap = self.calendar.count_trading_days_between(cand.timestamp_utc, decision_ts)
             if (decision_ts - cand.timestamp_utc).total_seconds() > self.max_stale_pre_seconds or trading_gap > 3:
-                return cand, OutcomeDataQualityStatus.STALE_OBSERVATION, "Pre-event anchor exceeds staleness limit"
-            return cand, OutcomeDataQualityStatus.VERIFIED, None
+                return cand, OutcomeDataQualityStatus.STALE_OBSERVATION, "Pre-event anchor exceeds staleness limit", "PRE_EVENT_REF"
+            return cand, OutcomeDataQualityStatus.VERIFIED, None, "PRE_EVENT_REF"
 
-        # POST_DECISION_EXECUTABLE
-        post = [o for o in observations if o.timestamp_utc >= decision_ts]
-        if not post:
-            return None, OutcomeDataQualityStatus.MISSING_DATA, "No executable observation at or after decision_ts"
-        cand = post[0]
+        # POST_DECISION_EXECUTABLE: require receipt + pipeline latency AND regular active session eligibility
+        eligible_ts = decision_ts + timedelta(milliseconds=self.pipeline_latency_ms)
+        in_session_post = [
+            o for o in observations
+            if o.timestamp_utc >= eligible_ts and self.calendar.is_in_session(o.timestamp_utc)
+        ]
+        if not in_session_post:
+            # Check if only off-hours prints existed before next session
+            return (
+                None,
+                OutcomeDataQualityStatus.MISSING_DATA,
+                f"No executable active-session observation at or after {eligible_ts.isoformat()}",
+                None,
+            )
+        cand = in_session_post[0]
         if cand.is_halted:
-            return cand, OutcomeDataQualityStatus.HALTED_TRADING, "Market halted at post-decision entry"
-        return cand, OutcomeDataQualityStatus.VERIFIED, None
+            return cand, OutcomeDataQualityStatus.HALTED_TRADING, "Market halted at post-decision entry", "HALTED"
+
+        tz = self.calendar._tz()
+        crossed_next_session = (
+            not self.calendar.is_in_session(eligible_ts)
+            or cand.timestamp_utc.astimezone(tz).date() != eligible_ts.astimezone(tz).date()
+        )
+        if self.executable_side > 0:
+            q_type = "EXEC_ASK_NEXT_SESSION" if crossed_next_session else "EXEC_ASK"
+        elif self.executable_side < 0:
+            q_type = "EXEC_BID_NEXT_SESSION" if crossed_next_session else "EXEC_BID"
+        else:
+            q_type = "NEXT_SESSION_OPEN" if crossed_next_session else "EXEC_OBSERVATION"
+        return cand, OutcomeDataQualityStatus.VERIFIED, None, q_type
 
     @staticmethod
     def _default_target_tolerance(horizon: OutcomeHorizon) -> Tuple[float, float]:
@@ -399,7 +436,6 @@ class EventStudyEngine:
         horizon: OutcomeHorizon,
     ) -> Tuple[Optional[PriceObservation], OutcomeDataQualityStatus, Optional[str]]:
         pre_tol, post_tol = self._default_target_tolerance(horizon)
-        # Prefer earliest observation strictly after start_ts closest to target_ts within [target-pre_tol, target+post_tol]
         candidates = [
             o for o in observations
             if o.timestamp_utc > start_ts
@@ -408,16 +444,30 @@ class EventStudyEngine:
         if not candidates:
             return None, OutcomeDataQualityStatus.MISSING_DATA, f"No observation within tolerance around target {target_ts.isoformat()}"
 
-        # Prefer observation >= target_ts if available; else closest before within pre_tol
         at_or_after = [o for o in candidates if o.timestamp_utc >= target_ts]
         chosen = at_or_after[0] if at_or_after else candidates[-1]
         if chosen.is_halted:
             return chosen, OutcomeDataQualityStatus.HALTED_TRADING, "Trading halted at horizon endpoint"
         return chosen, OutcomeDataQualityStatus.VERIFIED, None
 
+    def _effective_obs_price(self, obs: PriceObservation, role: str) -> float:
+        """
+        Extract executable or reaction reference price cleanly.
+        For EXECUTABLE mode with explicit side (+1 long / -1 short), cross the bid-ask spread.
+        """
+        raw = obs.price
+        if self.anchor_mode == AnchorMode.POST_DECISION_EXECUTABLE and self.executable_side != 0:
+            if obs.bid is not None and obs.ask is not None and obs.ask >= obs.bid > 0:
+                if role == "entry":
+                    raw = obs.ask if self.executable_side > 0 else obs.bid
+                elif role == "exit":
+                    raw = obs.bid if self.executable_side > 0 else obs.ask
+        return raw * obs.corporate_action_factor
+
     def _adjust_series_prices(
         self,
         window_obs: List[PriceObservation],
+        apply_executable_quotes: bool = False,
     ) -> Tuple[Optional[List[float]], OutcomeDataQualityStatus, bool, Optional[Dict[str, object]], Optional[str]]:
         """
         Apply corporate action multipliers and explicit futures rollover adjustments across `window_obs`.
@@ -429,17 +479,14 @@ class EventStudyEngine:
         start_obs = window_obs[0]
         end_obs = window_obs[-1]
 
-        # Detect trading halts anywhere along window endpoints or dominating interior
         if any(o.is_halted for o in (start_obs, end_obs)):
             return None, OutcomeDataQualityStatus.HALTED_TRADING, False, None, "Trading halted at endpoint"
 
-        # Check corporate action adjustment
         ca_applied = any(
             abs(o.corporate_action_factor - start_obs.corporate_action_factor) > 1e-9
             for o in window_obs
         )
 
-        # Check contract identity consistency
         contracts_seen = [o.contract_id for o in window_obs if o.contract_id is not None]
         distinct_contracts: List[str] = []
         for c in contracts_seen:
@@ -450,8 +497,18 @@ class EventStudyEngine:
         rollover_meta: Optional[Dict[str, object]] = None
         status = OutcomeDataQualityStatus.CORPORATE_ACTION_ADJUSTED if ca_applied else OutcomeDataQualityStatus.VERIFIED
 
-        # Compute base corporate-action adjusted prices
-        base_prices = [o.price * o.corporate_action_factor for o in window_obs]
+        base_prices: List[float] = []
+        n_w = len(window_obs)
+        for idx, o in enumerate(window_obs):
+            if apply_executable_quotes and self.anchor_mode == AnchorMode.POST_DECISION_EXECUTABLE and self.executable_side != 0:
+                if idx == 0:
+                    base_prices.append(self._effective_obs_price(o, "entry"))
+                elif idx == n_w - 1:
+                    base_prices.append(self._effective_obs_price(o, "exit"))
+                else:
+                    base_prices.append(o.price * o.corporate_action_factor)
+            else:
+                base_prices.append(o.price * o.corporate_action_factor)
 
         if len(distinct_contracts) > 1:
             if len(distinct_contracts) > 2:
@@ -479,7 +536,6 @@ class EventStudyEngine:
                 if o.contract_id == c_to:
                     if spec.method == FuturesRolloverMethod.ADDITIVE_SPREAD_BACK_ADJUST:
                         spread = spec.price_spread_to_minus_from or 0.0
-                        # Express post-rollover contract on pre-rollover price basis by subtracting rollover basis jump
                         p = p - spread
                     elif spec.method == FuturesRolloverMethod.RATIO_MULTIPLICATIVE:
                         ratio = spec.ratio_to_over_from or 1.0
@@ -504,6 +560,52 @@ class EventStudyEngine:
 
         return base_prices, status, rollover_applied, rollover_meta, None
 
+    def _estimate_pre_event_beta(
+        self,
+        inst_obs: Sequence[PriceObservation],
+        bench_obs: Sequence[PriceObservation],
+        cutoff_ts: datetime,
+    ) -> Tuple[Optional[float], int, Optional[datetime], Optional[datetime]]:
+        """
+        Estimate OLS beta strictly from pre-event observations (`timestamp_utc <= cutoff_ts`).
+        Zero future prices ever enter the beta calculation window.
+        """
+        pre_i = [o for o in inst_obs if o.timestamp_utc <= cutoff_ts and not o.is_halted]
+        pre_b = [o for o in bench_obs if o.timestamp_utc <= cutoff_ts and not o.is_halted]
+        if len(pre_i) < self.beta_min_samples + 1 or len(pre_b) < self.beta_min_samples + 1:
+            return None, max(0, min(len(pre_i), len(pre_b)) - 1), None, None
+
+        pre_i = pre_i[-(self.beta_lookback_obs + 1) :]
+        b_times = [o.timestamp_utc.timestamp() for o in pre_b]
+
+        aligned_i: List[float] = []
+        aligned_b: List[float] = []
+        aligned_ts: List[datetime] = []
+        j = 0
+        for oi in pre_i:
+            t_i = oi.timestamp_utc.timestamp()
+            while j + 1 < len(b_times) and b_times[j + 1] <= t_i:
+                j += 1
+            if abs(b_times[j] - t_i) <= 300.0 and pre_b[j].timestamp_utc <= cutoff_ts:
+                aligned_i.append(oi.price * oi.corporate_action_factor)
+                aligned_b.append(pre_b[j].price * pre_b[j].corporate_action_factor)
+                aligned_ts.append(oi.timestamp_utc)
+
+        if len(aligned_i) < self.beta_min_samples + 1:
+            return None, max(0, len(aligned_i) - 1), None, None
+
+        r_i = np.diff(np.asarray(aligned_i, dtype=np.float64)) / np.asarray(aligned_i[:-1], dtype=np.float64)
+        r_b = np.diff(np.asarray(aligned_b, dtype=np.float64)) / np.asarray(aligned_b[:-1], dtype=np.float64)
+        var_b = float(np.var(r_b))
+        if var_b < 1e-12:
+            return None, int(len(r_i)), aligned_ts[0], aligned_ts[-1]
+
+        cov_ib = float(np.mean((r_i - np.mean(r_i)) * (r_b - np.mean(r_b))))
+        est_beta = cov_ib / var_b
+        # Bound pathological small-sample leverage without hiding real variation
+        est_beta = max(-5.0, min(5.0, est_beta))
+        return round(est_beta, 6), int(len(r_i)), aligned_ts[0], aligned_ts[-1]
+
     def compute_outcome_label(
         self,
         event_id: str,
@@ -522,6 +624,8 @@ class EventStudyEngine:
         Compute a single causally verified EventOutcomeLabel for `(event_id, instrument_id, horizon)`.
         """
         sorted_obs = sorted(observations, key=lambda o: o.timestamp_utc)
+        lbl_type = self.label_type
+        lat_ms = self.pipeline_latency_ms if lbl_type == OutcomeLabelType.EXECUTABLE else 0.0
 
         # 1. Source Resolution Check
         est_res = self.estimate_bar_resolution_seconds(sorted_obs)
@@ -530,8 +634,10 @@ class EventStudyEngine:
                 event_id=event_id,
                 instrument_id=instrument_id,
                 horizon=horizon,
+                label_type=lbl_type,
                 event_timestamp_utc=event_timestamp_utc,
                 decision_timestamp_utc=decision_timestamp_utc,
+                pipeline_latency_ms=lat_ms,
                 benchmark_instrument=benchmark_instrument,
                 market_data_source=market_data_source,
                 anchor_mode=self.anchor_mode.value,
@@ -541,15 +647,20 @@ class EventStudyEngine:
             )
 
         # 2. Resolve Start Observation
-        start_obs, start_status, start_note = self._resolve_start_observation(sorted_obs, decision_timestamp_utc)
+        start_obs, start_status, start_note, quote_type = self._resolve_start_observation(
+            sorted_obs, decision_timestamp_utc
+        )
         if start_obs is None or start_status != OutcomeDataQualityStatus.VERIFIED:
             return EventOutcomeLabel(
                 event_id=event_id,
                 instrument_id=instrument_id,
                 horizon=horizon,
+                label_type=lbl_type,
                 event_timestamp_utc=event_timestamp_utc,
                 decision_timestamp_utc=decision_timestamp_utc,
                 outcome_start_price_ts=(start_obs.timestamp_utc if start_obs else None),
+                pipeline_latency_ms=lat_ms,
+                entry_quote_type=quote_type,
                 start_contract_id=(start_obs.contract_id if start_obs else None),
                 benchmark_instrument=benchmark_instrument,
                 market_data_source=market_data_source,
@@ -559,26 +670,33 @@ class EventStudyEngine:
                 is_synthetic=is_synthetic,
             )
 
+        entry_spread_bps: Optional[float] = None
+        if start_obs.bid is not None and start_obs.ask is not None and start_obs.ask >= start_obs.bid:
+            mid_s = (start_obs.ask + start_obs.bid) / 2.0
+            if mid_s > 0:
+                entry_spread_bps = round(((start_obs.ask - start_obs.bid) / mid_s) * 10000.0, 3)
+
         # 3. Resolve Target Endpoint Timestamp respecting sessions & holidays
-        # If event happens out-of-hours, active reaction clock runs from session open;
-        # for PRE_EVENT_AS_OF we anchor start price at prev close and advance from decision_ts across calendar.
         ref_clock = (
             decision_timestamp_utc
             if self.anchor_mode == AnchorMode.PRE_EVENT_AS_OF
-            else max(decision_timestamp_utc, start_obs.timestamp_utc)
+            else start_obs.timestamp_utc
         )
         target_ts, crossed_boundary = self._resolve_target_timestamp(horizon, ref_clock)
 
-        # Causal Maturity Check against evaluation_decision_ts (if caller is querying at a point in time)
         if evaluation_decision_ts is not None and target_ts > evaluation_decision_ts:
             return EventOutcomeLabel(
                 event_id=event_id,
                 instrument_id=instrument_id,
                 horizon=horizon,
+                label_type=lbl_type,
                 event_timestamp_utc=event_timestamp_utc,
                 decision_timestamp_utc=decision_timestamp_utc,
                 outcome_start_price_ts=start_obs.timestamp_utc,
                 outcome_end_price_ts=target_ts,
+                pipeline_latency_ms=lat_ms,
+                entry_quote_type=quote_type,
+                entry_spread_bps_cost=entry_spread_bps,
                 start_contract_id=start_obs.contract_id,
                 benchmark_instrument=benchmark_instrument,
                 market_data_source=market_data_source,
@@ -598,10 +716,14 @@ class EventStudyEngine:
                 event_id=event_id,
                 instrument_id=instrument_id,
                 horizon=horizon,
+                label_type=lbl_type,
                 event_timestamp_utc=event_timestamp_utc,
                 decision_timestamp_utc=decision_timestamp_utc,
                 outcome_start_price_ts=start_obs.timestamp_utc,
                 outcome_end_price_ts=(end_obs.timestamp_utc if end_obs else None),
+                pipeline_latency_ms=lat_ms,
+                entry_quote_type=quote_type,
+                entry_spread_bps_cost=entry_spread_bps,
                 start_contract_id=start_obs.contract_id,
                 end_contract_id=(end_obs.contract_id if end_obs else None),
                 benchmark_instrument=benchmark_instrument,
@@ -618,23 +740,30 @@ class EventStudyEngine:
                 event_id=event_id,
                 instrument_id=instrument_id,
                 horizon=horizon,
+                label_type=lbl_type,
                 event_timestamp_utc=event_timestamp_utc,
                 decision_timestamp_utc=decision_timestamp_utc,
                 outcome_start_price_ts=start_obs.timestamp_utc,
                 outcome_end_price_ts=end_obs.timestamp_utc,
+                pipeline_latency_ms=lat_ms,
+                entry_quote_type=quote_type,
+                entry_spread_bps_cost=entry_spread_bps,
                 data_quality_status=OutcomeDataQualityStatus.IMMATURE,
                 notes="Observed endpoint exceeds evaluation_decision_ts",
                 is_synthetic=is_synthetic,
             )
 
-        # 5. Gather Window Observations [start_obs, ..., end_obs] & Apply Rollover / Corp Action Adjustments
+        # 5. Gather Window Observations [start_obs, ..., end_obs] & Apply Adjustments
         window_obs = [
             o for o in sorted_obs
             if start_obs.timestamp_utc <= o.timestamp_utc <= end_obs.timestamp_utc
         ]
-        adj_prices, adj_status, rollover_applied, rollover_meta, adj_note = self._adjust_series_prices(window_obs)
+        adj_prices, adj_status, rollover_applied, rollover_meta, adj_note = self._adjust_series_prices(
+            window_obs,
+            apply_executable_quotes=(lbl_type == OutcomeLabelType.EXECUTABLE),
+        )
         overnight_gap = self.calendar.count_trading_days_between(start_obs.timestamp_utc, end_obs.timestamp_utc) >= 1 or (
-            not self.calendar.is_in_session(decision_timestamp_utc)
+            lbl_type == OutcomeLabelType.REACTION and not self.calendar.is_in_session(decision_timestamp_utc)
         )
 
         if adj_prices is None:
@@ -642,10 +771,14 @@ class EventStudyEngine:
                 event_id=event_id,
                 instrument_id=instrument_id,
                 horizon=horizon,
+                label_type=lbl_type,
                 event_timestamp_utc=event_timestamp_utc,
                 decision_timestamp_utc=decision_timestamp_utc,
                 outcome_start_price_ts=start_obs.timestamp_utc,
                 outcome_end_price_ts=end_obs.timestamp_utc,
+                pipeline_latency_ms=lat_ms,
+                entry_quote_type=quote_type,
+                entry_spread_bps_cost=entry_spread_bps,
                 start_contract_id=start_obs.contract_id,
                 end_contract_id=end_obs.contract_id,
                 benchmark_instrument=benchmark_instrument,
@@ -685,10 +818,16 @@ class EventStudyEngine:
         vols = [o.volume for o in window_obs[1:] if o.volume is not None and o.volume >= 0]
         total_vol = round(sum(vols), 2) if vols else None
 
-        # 7. Benchmark Return Adjustment over matching [start_ts, end_ts]
+        # 7. Benchmark Return Adjustment with Strict Causal Integrity (A5 Remediation)
         bench_ret: Optional[float] = None
         bench_adj_ret: Optional[float] = None
-        if benchmark_instrument and benchmark_observations:
+        adj_method = BenchmarkAdjustmentMethod.NONE
+        est_beta_val: Optional[float] = None
+        beta_count: Optional[int] = None
+        beta_w_start: Optional[datetime] = None
+        beta_w_end: Optional[datetime] = None
+
+        if benchmark_instrument and benchmark_observations and self.benchmark_mode != BenchmarkAdjustmentMethod.NONE:
             pre_tol, post_tol = self._default_target_tolerance(horizon)
             b_sorted = sorted(benchmark_observations, key=lambda o: o.timestamp_utc)
             b_start_cands = [o for o in b_sorted if o.timestamp_utc <= start_obs.timestamp_utc and not o.is_halted]
@@ -714,16 +853,40 @@ class EventStudyEngine:
                     OutcomeDataQualityStatus.CORPORATE_ACTION_ADJUSTED,
                 ):
                     bench_ret = round((b_adj[-1] / b_adj[0]) - 1.0, 6)
-                    bench_adj_ret = round(simple_ret - self.benchmark_beta * bench_ret, 6)
+                    if self.benchmark_mode == BenchmarkAdjustmentMethod.FIXED_BETA_LEGACY:
+                        beta_used = float(self.benchmark_beta if self.benchmark_beta is not None else 1.0)
+                        est_beta_val = beta_used
+                        adj_method = BenchmarkAdjustmentMethod.FIXED_BETA_LEGACY
+                        bench_adj_ret = round(simple_ret - beta_used * bench_ret, 6)
+                    elif self.benchmark_mode == BenchmarkAdjustmentMethod.PRE_EVENT_ROLLING_BETA:
+                        est_b, n_b, ws, we = self._estimate_pre_event_beta(sorted_obs, b_sorted, start_obs.timestamp_utc)
+                        beta_count = n_b
+                        beta_w_start = ws
+                        beta_w_end = we
+                        if est_b is not None:
+                            est_beta_val = est_b
+                            adj_method = BenchmarkAdjustmentMethod.PRE_EVENT_ROLLING_BETA
+                            bench_adj_ret = round(simple_ret - est_b * bench_ret, 6)
+                        else:
+                            # Explicitly fall back to unestimated simple market adjustment rather than claiming beta=1.0
+                            adj_method = BenchmarkAdjustmentMethod.SIMPLE_MARKET_ADJUSTED
+                            bench_adj_ret = round(simple_ret - bench_ret, 6)
+                    else:
+                        adj_method = BenchmarkAdjustmentMethod.SIMPLE_MARKET_ADJUSTED
+                        bench_adj_ret = round(simple_ret - bench_ret, 6)
 
         return EventOutcomeLabel(
             event_id=event_id,
             instrument_id=instrument_id,
             horizon=horizon,
+            label_type=lbl_type,
             event_timestamp_utc=event_timestamp_utc,
             decision_timestamp_utc=decision_timestamp_utc,
             outcome_start_price_ts=start_obs.timestamp_utc,
             outcome_end_price_ts=end_obs.timestamp_utc,
+            pipeline_latency_ms=lat_ms,
+            entry_quote_type=quote_type,
+            entry_spread_bps_cost=entry_spread_bps,
             start_price=round(p_start, 4),
             end_price=round(p_end, 4),
             raw_log_return=round(log_ret, 6),
@@ -731,6 +894,11 @@ class EventStudyEngine:
             benchmark_instrument=benchmark_instrument,
             benchmark_return=bench_ret,
             benchmark_adjusted_return=bench_adj_ret,
+            benchmark_adjustment_method=adj_method,
+            estimated_beta=est_beta_val,
+            beta_sample_count=beta_count,
+            beta_window_start_ts=beta_w_start,
+            beta_window_end_ts=beta_w_end,
             realized_volatility=realized_vol,
             max_favorable_excursion=round(mfe, 6),
             max_adverse_excursion=round(mae, 6),
@@ -778,4 +946,72 @@ class EventStudyEngine:
                 is_synthetic=is_synthetic,
             )
             for h in target_horizons
+        }
+
+    def compute_reaction_and_executable_pair(
+        self,
+        event_id: str,
+        instrument_id: str,
+        horizon: OutcomeHorizon,
+        event_timestamp_utc: datetime,
+        decision_timestamp_utc: datetime,
+        observations: Sequence[PriceObservation],
+        pipeline_latency_ms: float = 15.0,
+        executable_side: int = 0,
+        benchmark_instrument: Optional[str] = None,
+        benchmark_observations: Optional[Sequence[PriceObservation]] = None,
+        evaluation_decision_ts: Optional[datetime] = None,
+        market_data_source: str = "LOCAL_BARS",
+        is_synthetic: bool = False,
+    ) -> Dict[OutcomeLabelType, EventOutcomeLabel]:
+        """Compute separated REACTION vs POST_DECISION_EXECUTABLE labels for the same event."""
+        reaction_engine = EventStudyEngine(
+            calendar=self.calendar,
+            rollover_specs=list(self._rollover_map.values()),
+            anchor_mode=AnchorMode.PRE_EVENT_AS_OF,
+            benchmark_mode=self.benchmark_mode,
+            benchmark_beta=self.benchmark_beta,
+            beta_lookback_obs=self.beta_lookback_obs,
+            beta_min_samples=self.beta_min_samples,
+            max_stale_pre_seconds=self.max_stale_pre_seconds,
+        )
+        exec_engine = EventStudyEngine(
+            calendar=self.calendar,
+            rollover_specs=list(self._rollover_map.values()),
+            anchor_mode=AnchorMode.POST_DECISION_EXECUTABLE,
+            pipeline_latency_ms=pipeline_latency_ms,
+            executable_side=executable_side,
+            benchmark_mode=self.benchmark_mode,
+            benchmark_beta=self.benchmark_beta,
+            beta_lookback_obs=self.beta_lookback_obs,
+            beta_min_samples=self.beta_min_samples,
+            max_stale_pre_seconds=self.max_stale_pre_seconds,
+        )
+        return {
+            OutcomeLabelType.REACTION: reaction_engine.compute_outcome_label(
+                event_id=event_id,
+                instrument_id=instrument_id,
+                horizon=horizon,
+                event_timestamp_utc=event_timestamp_utc,
+                decision_timestamp_utc=decision_timestamp_utc,
+                observations=observations,
+                benchmark_instrument=benchmark_instrument,
+                benchmark_observations=benchmark_observations,
+                evaluation_decision_ts=evaluation_decision_ts,
+                market_data_source=market_data_source,
+                is_synthetic=is_synthetic,
+            ),
+            OutcomeLabelType.EXECUTABLE: exec_engine.compute_outcome_label(
+                event_id=event_id,
+                instrument_id=instrument_id,
+                horizon=horizon,
+                event_timestamp_utc=event_timestamp_utc,
+                decision_timestamp_utc=decision_timestamp_utc,
+                observations=observations,
+                benchmark_instrument=benchmark_instrument,
+                benchmark_observations=benchmark_observations,
+                evaluation_decision_ts=evaluation_decision_ts,
+                market_data_source=market_data_source,
+                is_synthetic=is_synthetic,
+            ),
         }

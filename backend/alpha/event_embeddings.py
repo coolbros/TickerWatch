@@ -1,11 +1,17 @@
 """Dense Semantic Embedding Engine for Financial Events.
 
 Provides compact, CPU-friendly pretrained transformer inference (`BAAI/bge-small-en-v1.5`
-INT8 quantized ONNX, 384-dim, MIT License) alongside a zero-weight financial concept projection
-baseline (`fin-concept-proj-256d-v1`).
+INT8 quantized ONNX via `Xenova/bge-small-en-v1.5`, 384-dim, MIT License) alongside a
+zero-weight financial concept projection baseline (`fin-concept-proj-256d-v1`).
 
-All generated vectors carry explicit `model_version` metadata so embeddings from incompatible
-model spaces are never silently mixed during retrieval.
+Phase 5 (Work Package A3) Preprocessing Parity Specification:
+- Pinned HuggingFace snapshot revision: `ea104dacec62c0de699686887e3f920caeb4f3e3`.
+- Official BAAI/FlagEmbedding pooling: `[CLS]` token (index 0) + L2 unit normalization.
+- Tokenizer parity: `[CLS]=101`, `[SEP]=102`, `[PAD]=0`, `max_length=512`, real `token_type_ids`.
+- Asymmetric retrieval protocol: document vectors encoded unprefixed; retrieval queries
+  prefixed with `"Represent this sentence for searching relevant passages: "`.
+- Version isolation: bumped to `bge-small-en-v1.5-onnx-int8-cls512-v2` so earlier `v1` vectors
+  are never silently mixed in cosine retrieval.
 """
 
 from enum import Enum
@@ -23,7 +29,8 @@ from pydantic import BaseModel, Field
 class EmbeddingModelVersion(str, Enum):
     """Canonical model versions ensuring strict vector space compatibility."""
 
-    BGE_SMALL_EN_V1_5_INT8 = "bge-small-en-v1.5-onnx-int8"
+    BGE_SMALL_EN_V1_5_INT8 = "bge-small-en-v1.5-onnx-int8"  # Legacy Phase 4 v1 (max_length=192, no query prefix)
+    BGE_SMALL_EN_V1_5_INT8_V2 = "bge-small-en-v1.5-onnx-int8-cls512-v2"  # Pinned Phase 5 v2 (CLS, 512, BGE query instruction)
     FIN_CONCEPT_PROJECTION_V1 = "fin-concept-proj-256d-v1"
 
 
@@ -109,8 +116,20 @@ class BaseEventEncoder:
     def encode_batch(self, texts: List[str]) -> np.ndarray:
         raise NotImplementedError
 
+    def encode_documents(self, texts: List[str]) -> np.ndarray:
+        """Encode candidate corpus documents for vector indexing."""
+        return self.encode_batch(texts)
+
+    def encode_queries(self, texts: List[str]) -> np.ndarray:
+        """Encode search queries (may apply model-specific retrieval instructions)."""
+        return self.encode_batch(texts)
+
     def encode_single(self, text: str) -> List[float]:
         mat = self.encode_batch([text])
+        return mat[0].tolist()
+
+    def encode_query_single(self, text: str) -> List[float]:
+        mat = self.encode_queries([text])
         return mat[0].tolist()
 
 
@@ -118,17 +137,31 @@ class ONNXBgeSmallEncoder(BaseEventEncoder):
     """
     CPU-optimized INT8 quantized ONNX inference for `BAAI/bge-small-en-v1.5`.
     Model: Xenova/bge-small-en-v1.5 (33M params, 384-dim, ~34MB INT8 ONNX, MIT License).
-    Executes strictly offline using cached HuggingFace snapshot weights.
+    Executes strictly offline using cached HuggingFace snapshot weights at pinned revision.
     """
 
     REPO_ID = "Xenova/bge-small-en-v1.5"
-    model_version = EmbeddingModelVersion.BGE_SMALL_EN_V1_5_INT8.value
+    PINNED_REVISION = "ea104dacec62c0de699686887e3f920caeb4f3e3"
+    BGE_QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: "
+    model_version = EmbeddingModelVersion.BGE_SMALL_EN_V1_5_INT8_V2.value
     dimension = 384
     license_name = "MIT"
 
-    def __init__(self, max_length: int = 192, intra_op_threads: int = 2) -> None:
+    def __init__(
+        self,
+        max_length: int = 512,
+        intra_op_threads: int = 2,
+        pooling_mode: str = "cls",
+        use_query_instruction: bool = True,
+        revision: Optional[str] = PINNED_REVISION,
+    ) -> None:
+        if pooling_mode not in ("cls", "mean"):
+            raise ValueError(f"Unsupported pooling_mode '{pooling_mode}'. Expected 'cls' or 'mean'.")
         self.max_length = max_length
         self.intra_op_threads = intra_op_threads
+        self.pooling_mode = pooling_mode
+        self.use_query_instruction = use_query_instruction
+        self.revision = revision
         self._session: Any = None
         self._tokenizer: Any = None
         self._load_error: Optional[str] = None
@@ -147,8 +180,18 @@ class ONNXBgeSmallEncoder(BaseEventEncoder):
             import onnxruntime as ort
             from tokenizers import Tokenizer
 
-            tok_path = hf_hub_download(self.REPO_ID, "tokenizer.json", local_files_only=True)
-            mdl_path = hf_hub_download(self.REPO_ID, "onnx/model_quantized.onnx", local_files_only=True)
+            tok_path = hf_hub_download(
+                self.REPO_ID,
+                "tokenizer.json",
+                revision=self.revision,
+                local_files_only=True,
+            )
+            mdl_path = hf_hub_download(
+                self.REPO_ID,
+                "onnx/model_quantized.onnx",
+                revision=self.revision,
+                local_files_only=True,
+            )
 
             tok = Tokenizer.from_file(tok_path)
             tok.enable_truncation(max_length=self.max_length)
@@ -169,7 +212,7 @@ class ONNXBgeSmallEncoder(BaseEventEncoder):
     def is_available(self) -> bool:
         return self._ensure_loaded()
 
-    def encode_batch(self, texts: List[str]) -> np.ndarray:
+    def _encode_internal(self, texts: List[str]) -> np.ndarray:
         if not self._ensure_loaded():
             raise RuntimeError(f"ONNX model {self.REPO_ID} unavailable offline: {self._load_error}")
         if not texts:
@@ -178,7 +221,7 @@ class ONNXBgeSmallEncoder(BaseEventEncoder):
         encs = self._tokenizer.encode_batch(texts)
         input_ids = np.array([e.ids for e in encs], dtype=np.int64)
         attention_mask = np.array([e.attention_mask for e in encs], dtype=np.int64)
-        token_type_ids = np.zeros_like(input_ids, dtype=np.int64)
+        token_type_ids = np.array([e.type_ids for e in encs], dtype=np.int64)
 
         outs = self._session.run(
             None,
@@ -188,10 +231,96 @@ class ONNXBgeSmallEncoder(BaseEventEncoder):
                 "token_type_ids": token_type_ids,
             },
         )
-        # BGE models use CLS pooling at index 0
-        cls_embeddings = outs[0][:, 0, :].astype(np.float32)
-        norms = np.linalg.norm(cls_embeddings, axis=1, keepdims=True)
-        return cls_embeddings / np.clip(norms, 1e-12, None)
+        last_hidden = outs[0]
+        if self.pooling_mode == "cls":
+            # BAAI/bge-small-en-v1.5 reference architecture pools [CLS] token at index 0
+            pooled = last_hidden[:, 0, :].astype(np.float32)
+        else:
+            mask = attention_mask[:, :, None].astype(np.float32)
+            pooled = ((last_hidden * mask).sum(axis=1) / np.clip(mask.sum(axis=1), 1e-12, None)).astype(np.float32)
+
+        norms = np.linalg.norm(pooled, axis=1, keepdims=True)
+        return pooled / np.clip(norms, 1e-12, None)
+
+    def encode_batch(self, texts: List[str]) -> np.ndarray:
+        return self._encode_internal(texts)
+
+    def encode_documents(self, texts: List[str]) -> np.ndarray:
+        """Encode documents cleanly without query instruction prefix."""
+        return self._encode_internal(texts)
+
+    def encode_queries(self, texts: List[str]) -> np.ndarray:
+        """Encode search queries using official BGE v1.5 retrieval instruction prefix."""
+        if self.use_query_instruction:
+            prefixed = [
+                t if t.startswith(self.BGE_QUERY_INSTRUCTION) else f"{self.BGE_QUERY_INSTRUCTION}{t}"
+                for t in texts
+            ]
+            return self._encode_internal(prefixed)
+        return self._encode_internal(texts)
+
+    def inspect_tokenization(self, text: str) -> Dict[str, Any]:
+        """Inspect exact tokenizer special tokens, truncation, and type_ids for parity testing."""
+        if not self._ensure_loaded():
+            raise RuntimeError(f"ONNX model {self.REPO_ID} unavailable offline: {self._load_error}")
+        enc = self._tokenizer.encode(text)
+        return {
+            "ids": list(enc.ids),
+            "tokens": list(enc.tokens),
+            "attention_mask": list(enc.attention_mask),
+            "type_ids": list(enc.type_ids),
+            "max_length": self.max_length,
+            "pooling_mode": self.pooling_mode,
+            "revision": self.revision,
+            "model_version": self.model_version,
+        }
+
+
+def verify_bge_preprocessing_parity() -> Dict[str, Any]:
+    """
+    Run reproducible offline verification confirming tokenizer special tokens,
+    max_length=512 truncation, CLS pooling vs mean pooling sensitivity,
+    L2 normalization, and query instruction behavior.
+    """
+    enc_cls = ONNXBgeSmallEncoder(max_length=512, pooling_mode="cls", use_query_instruction=True)
+    if not enc_cls.is_available():
+        return {"onnx_available": False}
+
+    enc_mean = ONNXBgeSmallEncoder(max_length=512, pooling_mode="mean", use_query_instruction=True)
+    tok_info = enc_cls.inspect_tokenization("TCS reports strong Q3 earnings")
+
+    # Verify padding sensitivity & normalization
+    sample_doc = "Infosys cuts full year revenue guidance amid banking weakness"
+    sample_q = "IT major trims annual top-line outlook"
+    d_cls = enc_cls.encode_documents([sample_doc])[0]
+    q_cls = enc_cls.encode_queries([sample_q])[0]
+    q_cls_noprefix = enc_cls.encode_documents([sample_q])[0]
+    d_mean = enc_mean.encode_documents([sample_doc])[0]
+    q_mean = enc_mean.encode_queries([sample_q])[0]
+
+    # Truncation test over > 512 tokens
+    long_text = " ".join(["revenue"] * 600)
+    long_tok = enc_cls.inspect_tokenization(long_text)
+
+    # Single vs padded batch cosine similarity (quantization invariance)
+    v_single = enc_cls.encode_documents([sample_doc])[0]
+    v_padded = enc_cls.encode_documents([sample_doc, "word " * 120])[0]
+
+    return {
+        "onnx_available": True,
+        "model_version": enc_cls.model_version,
+        "pinned_revision": enc_cls.PINNED_REVISION,
+        "cls_token_id": tok_info["ids"][0],
+        "sep_token_id": tok_info["ids"][-1],
+        "max_length": enc_cls.max_length,
+        "long_text_truncated_len": len(long_tok["ids"]),
+        "doc_norm_cls": round(float(np.linalg.norm(d_cls)), 6),
+        "cls_with_instruction_sim": round(float(np.dot(q_cls, d_cls)), 6),
+        "cls_no_instruction_sim": round(float(np.dot(q_cls_noprefix, d_cls)), 6),
+        "mean_with_instruction_sim": round(float(np.dot(q_mean, d_mean)), 6),
+        "cls_vs_mean_doc_cosine": round(float(np.dot(d_cls, d_mean)), 6),
+        "single_vs_padded_batch_cosine": round(float(np.dot(v_single, v_padded)), 6),
+    }
 
 
 class FinConceptProjectionEncoder(BaseEventEncoder):
@@ -241,13 +370,11 @@ class FinConceptProjectionEncoder(BaseEventEncoder):
             acc = np.zeros(self.dimension, dtype=np.float32)
             token_set = set(tokens)
 
-            # High weight on domain semantic concept synsets
             for cname, terms in self.CONCEPT_GROUPS.items():
                 overlap = sum(1 for t in terms if t in token_set)
                 if overlap > 0:
                     acc += (1.5 * math.sqrt(overlap)) * self._concept_vectors[cname]
 
-            # Lexical unigrams + character trigram projection
             for t in tokens:
                 acc += 0.35 * self._hash_token_vector(t)
                 if len(t) >= 4:
@@ -264,7 +391,7 @@ class FinConceptProjectionEncoder(BaseEventEncoder):
 class EventEmbeddingEngine:
     """
     Unified, version-aware dense semantic embedding facade.
-    Automatically selects `BGE_SMALL_EN_V1_5_INT8` when offline quantized ONNX weights
+    Automatically selects `BGE_SMALL_EN_V1_5_INT8_V2` when offline quantized ONNX weights
     are cached locally, or operates using `FIN_CONCEPT_PROJECTION_V1`.
     """
 
@@ -295,6 +422,7 @@ class EventEmbeddingEngine:
         event_subtype: Optional[str] = None,
         primary_entity: Optional[str] = None,
         encoder_override: Optional[BaseEventEncoder] = None,
+        as_query: bool = False,
     ) -> VersionedEmbedding:
         """Encode a financial event into a versioned dense semantic vector."""
         enc = encoder_override or self.active_encoder
@@ -305,7 +433,7 @@ class EventEmbeddingEngine:
             primary_entity=primary_entity,
         )
         t0 = time.perf_counter_ns()
-        vec = enc.encode_single(canonical_text)
+        vec = enc.encode_query_single(canonical_text) if as_query else enc.encode_documents([canonical_text])[0].tolist()
         dt_ms = (time.perf_counter_ns() - t0) / 1_000_000.0
         digest = hashlib.sha256(canonical_text.encode("utf-8")).hexdigest()[:16]
 
@@ -319,9 +447,9 @@ class EventEmbeddingEngine:
         )
 
     def encode_texts(self, texts: List[str], encoder_override: Optional[BaseEventEncoder] = None) -> np.ndarray:
-        """Batch-encode arbitrary strings."""
+        """Batch-encode arbitrary strings as documents."""
         enc = encoder_override or self.active_encoder
-        return enc.encode_batch(texts)
+        return enc.encode_documents(texts)
 
 
 _embedding_engine: Optional[EventEmbeddingEngine] = None

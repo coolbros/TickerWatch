@@ -7,7 +7,7 @@
 **Author:** Agastya Varshney (`agastyavarshney@gmail.com`)  
 **Branch:** `phase/4-historical-intelligence` → `main`  
 **GitHub Pull Request:** [`coolbros/TickerWatch#2`](https://github.com/coolbros/TickerWatch/pull/2)  
-**Status:** COMPLETE — ALL OFFLINE QUALITY GATES VERIFIED; PR OPEN FOR NORMAL MERGE EXECUTION  
+**Status:** MERGED INTO `main` (`66b9328`) — REMEDIATED IN PHASE 5 WP-A (`4.1.0-alpha`)  
 
 ---
 
@@ -155,4 +155,4 @@ Executed offline via `.venv\Scripts\python.exe` with `pytest` over the complete 
 
 - **Pull Request:** [`https://github.com/coolbros/TickerWatch/pull/2`](https://github.com/coolbros/TickerWatch/pull/2)
 - **Source → Target:** `phase/4-historical-intelligence` → `main`
-- **Status at Report Commit:** Open (`state: open`) with granular commits `2157b5e` through `c9eb350` (and this final report commit) pushed cleanly to `origin/phase/4-historical-intelligence`; targeted for integration via **normal merge commit** (`merge_method = merge`, preserving every individual Phase 2, Phase 3 `701e5eb`, and Phase 4 commit with zero squashing or rebasing).
+- **Status at Integration:** **MERGED** via GitHub Pull Request #2 into `main` on 2026-11-10 using normal merge commit `66b9328ec67695f96f0e2155d989e3c1194d0ae7` (`parents: ebcdf67, 17f9072`, zero squashing or rebasing). Follow-up Phase 4 correctness remediations (`A1`–`A7`, `4.1.0-alpha`) are documented in `docs/alpha/PHASE_5_PHASE_4_REMEDIATION.md`.

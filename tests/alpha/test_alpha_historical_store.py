@@ -175,3 +175,63 @@ def test_separated_embeddings_and_matured_outcomes(tmp_path):
     assert stats["total_events"] == 1
     assert stats["total_embeddings"] == 2
     assert stats["total_outcomes"] == 3
+
+
+def test_bitemporal_revision_as_of_reconstruction(tmp_path):
+    """Verify A2 bitemporal guarantee: querying before a correction sees only Rev 1, never Rev 2."""
+    db_file = tmp_path / "bitemporal.db"
+    store = PersistentHistoricalEventStore(db_path=db_file)
+    pipeline = get_nlp_pipeline()
+
+    t1 = datetime(2026, 2, 10, 4, 30, 0, tzinfo=timezone.utc)
+    t2 = datetime(2026, 2, 10, 6, 30, 0, tzinfo=timezone.utc)
+
+    rep_v1 = pipeline.process_raw_text(
+        "L&T wins order worth Rs 2,500 crore from Middle East",
+        decision_timestamp=t1,
+        event_id="lt_bitemp_1",
+    )
+    _, st1 = store.upsert_event(rep_v1, jurisdiction=MarketJurisdiction.IN)
+    assert st1 == "INSERTED"
+    store.save_embedding("lt_bitemp_1", "test-emb-v2", [1.0, 0.0, 0.0, 0.0], revision_number=1)
+
+    rep_v2 = pipeline.process_raw_text(
+        "Correction: L&T wins expanded infrastructure contract worth Rs 4,100 crore from Middle East",
+        decision_timestamp=t2,
+        event_id="lt_bitemp_1",
+    )
+    _, st2 = store.upsert_event(rep_v2, jurisdiction=MarketJurisdiction.IN)
+    assert st2 == "UPDATED_REVISION"
+    store.save_embedding("lt_bitemp_1", "test-emb-v2", [0.0, 1.0, 0.0, 0.0], revision_number=2)
+
+    before_corr_ts = t1 + timedelta(hours=1)
+    q_before = store.query_events(decision_timestamp=before_corr_ts, jurisdiction=MarketJurisdiction.IN)
+    assert len(q_before) == 1
+    assert q_before[0].revision_number == 1
+    assert "2,500 crore" in q_before[0].headline
+    assert "4,100 crore" not in q_before[0].headline
+    assert q_before[0].extracted_metrics[0]["normalized_value"] == pytest.approx(2.5e10)
+
+    ev_as_of_before = store.get_event_as_of("lt_bitemp_1", before_corr_ts)
+    assert ev_as_of_before is not None and ev_as_of_before.revision_number == 1
+
+    embs_before = store.get_embeddings_batch(
+        ["lt_bitemp_1"],
+        model_version="test-emb-v2",
+        revision_map={"lt_bitemp_1": 1},
+    )
+    assert embs_before["lt_bitemp_1"] == pytest.approx([1.0, 0.0, 0.0, 0.0])
+
+    assert store.get_event_as_of("lt_bitemp_1", t1) is None
+
+    after_corr_ts = t2 + timedelta(minutes=5)
+    q_after = store.query_events(decision_timestamp=after_corr_ts, jurisdiction=MarketJurisdiction.IN)
+    assert len(q_after) == 1
+    assert q_after[0].revision_number == 2
+    assert "4,100 crore" in q_after[0].headline
+    embs_after = store.get_embeddings_batch(
+        ["lt_bitemp_1"],
+        model_version="test-emb-v2",
+        revision_map={"lt_bitemp_1": 2},
+    )
+    assert embs_after["lt_bitemp_1"] == pytest.approx([0.0, 1.0, 0.0, 0.0])

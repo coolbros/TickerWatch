@@ -141,3 +141,10 @@ def test_end_to_end_historical_intelligence_pipeline_and_label_separation(tmp_pa
     assert bridge_res.query_event_id == query_rep.event_id
     # Re-querying must still exclude itself!
     assert query_rep.event_id not in bridge_res.retrieved_event_ids
+
+    from backend.alpha.historical_intelligence import assert_valid_phase4_training_input
+
+    validated = assert_valid_phase4_training_input(result)
+    assert validated.historical_context_source == "PHASE_4_PERSISTENT_MATURITY_VERIFIED"
+    with pytest.raises(TypeError, match="legacy Phase 3 EventRetrievalContext is prohibited"):
+        assert_valid_phase4_training_input(query_rep.historical_context)
