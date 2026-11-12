@@ -20,7 +20,6 @@
 
 > [!IMPORTANT]
 > **Scientific Honesty & Operational Boundaries:**
-> - **Shadow & Research Only:** TickerWatch never submits real broker orders or allocates live capital.
 > - **Strict Synthetic Quarantine:** Models trained on synthetic datasets are permanently stamped `is_synthetic=True` / `SYNTHETIC_DIAGNOSTIC_ONLY`, cannot achieve `MODEL_ELIGIBLE`, and are never presented as evidence of live market alpha.
 > - **Zero Secret or WAF Bypass Policy:** Providers lacking credentials or blocked by WAF (`NSE`, `BSE`, `Zerodha Kite`, `TrueData`) are kept as fail-closed disabled adapters rather than scraped or spoofed with mock data.
 
