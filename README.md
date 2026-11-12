@@ -3,7 +3,7 @@
 > **Local-First Financial Information Ingestion, Causal Event Intelligence, Predictive Modeling & Shadow Validation**
 >
 > Testing the event-conditioned predictive hypothesis: $P(\Delta F_{t+h} \mid E_t, H_t, M_t)$
-> *(No automated broker order routing, no live capital deployment, no look-ahead leakage)*
+
 
 ---
 
